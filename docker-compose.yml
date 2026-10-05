@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: visualizer
+      POSTGRES_USER: visualizer
+      POSTGRES_PASSWORD: visualizer
+    ports:
+      - "5432:5432"
+    volumes:
+      - visualizer-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U visualizer -d visualizer"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./data-visualizer-api
+    environment:
+      PORT: 3000
+      WEB_ORIGIN: http://localhost:4200
+      DATABASE_URL: postgres://visualizer:visualizer@postgres:5432/visualizer
+      CREDENTIAL_ENCRYPTION_KEY: replace-with-a-32-byte-secret-key-123456
+      AI_PROVIDER: ${AI_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}
+      AI_MODEL: ${AI_MODEL:-deepseek-flash}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build: ./data-visualizer-web
+    ports:
+      - "4200:80"
+    depends_on:
+      - api
+
+volumes:
+  visualizer-postgres:

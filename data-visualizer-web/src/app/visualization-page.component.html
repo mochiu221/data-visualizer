@@ -1,0 +1,26 @@
+<main class="detail-page">
+  <a class="back-link" routerLink="/">← Back to workspace</a>
+  <p class="eyebrow">VISUALIZATION PAGE</p>
+  <div *ngIf="loading" class="state">Loading visualization...</div>
+  <div *ngIf="error" class="state error">{{ error }}</div>
+  <ng-container *ngIf="visualization as item">
+    <header class="detail-head"><div><h1>{{ item.title }}</h1><p>{{ item.source }} · {{ item.type }} chart</p></div><button class="refresh" (click)="loadVisualization(item.id)">↻ Refresh</button></header>
+    <section class="query-card"><p class="eyebrow">EXECUTED QUERY</p><pre class="query-text">{{ item.query || item.request }}</pre></section>
+    <section class="filters" *ngIf="item.filterControls.length"><div class="filter-content"><div class="filter-heading"><div><p class="eyebrow">FILTER DATA</p><p class="filter-hint">Narrow the live result with the controls below.</p></div><span class="filter-count">{{ item.filterControls.length }} available</span></div><div class="filter-grid"><label *ngFor="let control of item.filterControls; trackBy: trackFilterControl"><span>{{ control.label }}</span><input *ngIf="control.type === 'text' || control.type === 'number'" [type]="control.type" [placeholder]="control.type === 'number' ? 'Any value' : 'Search...'" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="control.type === 'date'" type="date" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="control.type === 'time'" type="time" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="control.type === 'datetime'" type="datetime-local" lang="en-GB" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><select *ngIf="control.type === 'boolean'" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><option [ngValue]="null">Any</option><option [ngValue]="true">Yes</option><option [ngValue]="false">No</option></select></label></div></div><div class="filter-actions"><button class="refresh" (click)="clearFilters()">Clear</button><button class="apply" (click)="applyFilters()">Apply filters</button></div></section>
+    <section class="visual-frame">
+      <div class="axis-label">{{ item.chart?.yAxis?.label ?? 'VALUE' }}</div>
+      <div class="bars" *ngIf="item.type === 'bar'">
+        <div class="bar-item" *ngFor="let value of item.data"><div class="bar" [style.height.%]="chartValue(value) / 60 * 100"><span>{{ chartValue(value) }}</span></div><small>{{ chartLabel(value) }}</small></div>
+      </div>
+      <div class="line-chart" *ngIf="item.type === 'line'">
+        <div class="line-library-plot"><canvas #lineCanvas aria-label="Line chart"></canvas></div>
+      </div>
+      <div class="donut-chart" *ngIf="item.type === 'donut'">
+        <div class="donut-ring" [style.background]="donutGradient()"><div class="donut-hole"><strong>{{ donutTotal() }}</strong><small>{{ item.chart?.yAxis?.label ?? 'Total' }}</small></div></div>
+        <div class="donut-legend"><div *ngFor="let value of item.data; let index = index"><span class="legend-swatch" [style.background]="['#2b805d', '#d77b43', '#73b58e', '#c65d4c', '#4e7891', '#b38b4a'][index % 6]"></span><span>{{ chartLabel(value) }}</span><strong>{{ donutPercent(value) }}%</strong></div></div>
+      </div>
+      <table *ngIf="item.type === 'table'"><thead><tr><th *ngFor="let key of keys()">{{ key }}</th></tr></thead><tbody><tr *ngFor="let row of item.data"><td *ngFor="let key of keys()">{{ row[key] }}</td></tr></tbody></table>
+    </section>
+    <section class="details-grid"><div><span class="eyebrow">QUERY PLAN</span><p>Page {{ item.queryPlan?.page ?? 1 }} · {{ item.queryPlan?.pageSize ?? item.data.length }} results per page</p></div><div><span class="eyebrow">FILTERS</span><p>{{ item.queryPlan?.filters?.length || 0 }} filter(s) selected by AI</p></div><div><span class="eyebrow">SORT</span><p>{{ sortSummary() }}</p></div></section>
+  </ng-container>
+</main>
