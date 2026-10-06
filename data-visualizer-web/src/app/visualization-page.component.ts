@@ -20,7 +20,7 @@ interface Visualization {
   type: 'bar' | 'line' | 'donut' | 'table';
   data: Array<Record<string, string | number>>;
   schema?: Array<{ name: string; type: string }>;
-  chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAggregation: string };
+  chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAxes?: Array<{ field: string; label: string; scale?: 'category' | 'time' }>; yAggregation: string };
   filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to' }>;
   queryPlan?: { page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
 }
@@ -176,9 +176,12 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     const xAxisField = chart?.xAxis.field;
     const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && typeof value === 'number').map(([field]) => field)))];
     const yAxisField = chart?.yAxis.field;
-    const seriesFields = yAxisField && numericFields.includes(yAxisField)
-      ? [yAxisField, ...numericFields.filter((field) => field !== yAxisField)]
-      : numericFields;
+    const configuredFields = chart?.yAxes?.map((axis) => axis.field).filter((field) => numericFields.includes(field)) ?? [];
+    const seriesFields = configuredFields.length
+      ? [...configuredFields, ...numericFields.filter((field) => !configuredFields.includes(field))]
+      : yAxisField && numericFields.includes(yAxisField)
+        ? [yAxisField, ...numericFields.filter((field) => field !== yAxisField)]
+        : numericFields;
     const colors = ['#1f7055', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#73b58e'];
     const isTimeScale = chart?.xAxis.scale === 'time';
     this.lineChart = new Chart<'line', (number | { x: string; y: number })[], string>(this.lineCanvas.nativeElement, {
@@ -186,7 +189,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
       data: {
         labels: isTimeScale ? undefined : this.visualization.data.map((item) => this.chartLabel(item)),
         datasets: seriesFields.map((field, index) => ({
-          label: field === yAxisField ? chart?.yAxis.label ?? field : field,
+          label: chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === yAxisField ? chart?.yAxis.label ?? field : field),
           data: isTimeScale
             ? this.visualization!.data.map((item) => ({ x: this.chartTimeValue(item), y: Number(item[field] ?? 0) }))
             : this.visualization!.data.map((item) => Number(item[field] ?? 0)),
