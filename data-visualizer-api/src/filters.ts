@@ -64,7 +64,8 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
         if (value === null || value === '') continue;
         const control = controls.get(key) ?? controls.get(`${key}::${visualization.filterControls.find((item) => item.field === key)?.operator}`)!;
         const field = control.field;
-        if (control.type === 'number' && typeof value !== 'number') throw new Error(`Filter value for ${field} must be a number.`);
+        const normalizedValue = control.type === 'number' && typeof value === 'string' ? Number(value) : value;
+        if (control.type === 'number' && (typeof normalizedValue !== 'number' || !Number.isFinite(normalizedValue))) throw new Error(`Filter value for ${field} must be a number.`);
         if (control.type === 'boolean' && typeof value !== 'boolean') throw new Error(`Filter value for ${field} must be true or false.`);
         if (control.type === 'text' && typeof value !== 'string') throw new Error(`Filter value for ${field} must be text.`);
         if (control.type === 'date' || control.type === 'datetime' || control.type === 'time') {
@@ -73,7 +74,7 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
             filters.push(...temporalFilters(field, control.operator, value, control.type));
             continue;
         }
-        filters.push({ field, operator: control.operator, value, type: control.type });
+        filters.push({ field, operator: control.operator, value: normalizedValue, type: control.type });
     }
     return { ...visualization.queryPlan, filters, page: 1 };
 }
