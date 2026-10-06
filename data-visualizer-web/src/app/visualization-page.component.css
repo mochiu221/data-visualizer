@@ -1,3 +1,18 @@
+.table-pagination { align-items: center; color: #718078; display: flex; font-size: .82rem; justify-content: space-between; margin-top: 12px; }
+.table-scroll-frame { max-width: 100%; overflow: hidden; position: relative; }
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-content { position: relative; width: max-content; min-width: 100%; }
+.table-content table { width: max-content; min-width: 100%; }
+.table-scroll { cursor: grab; scrollbar-width: thin; }
+.table-scroll-frame::before, .table-scroll-frame::after { content: ''; inset-block: 0; opacity: 0; pointer-events: none; position: absolute; transition: opacity .2s ease; width: 28px; z-index: 1; }
+.table-scroll-frame::before { background: linear-gradient(90deg, rgba(255, 255, 255, .95), transparent); left: 0; }
+.table-scroll-frame::after { background: linear-gradient(270deg, rgba(255, 255, 255, .95), transparent); right: 0; }
+.table-scroll-frame.can-scroll-left::before, .table-scroll-frame.can-scroll-right::after { opacity: 1; }
+.table-scroll:active { cursor: grabbing; }
+.table-scroll table { user-select: none; }
+.table-pagination div { align-items: center; display: flex; gap: 12px; }
+.table-pagination button { align-items: center; background: #edf4ef; border: 0; border-radius: 6px; color: #1f7055; cursor: pointer; display: inline-flex; font-size: 1rem; height: 30px; justify-content: center; width: 30px; }
+.table-pagination button:disabled { cursor: default; opacity: .4; }
 :host { display: block; min-height: 100vh; background: #f7f9f6; color: #17211b; }
 .visual-frame { min-height: 0 !important; padding: 34px 36px 28px !important; border: 1px solid #dfe7e4 !important; border-radius: 18px !important; background: #ffffff !important; box-shadow: 0 16px 40px rgba(31, 50, 43, .07), 0 2px 8px rgba(31, 50, 43, .04); }
 .axis-label { position: static !important; margin: 0 0 18px 2px; color: #718078 !important; font: 700 10px/1 Arial, sans-serif !important; letter-spacing: .16em !important; }

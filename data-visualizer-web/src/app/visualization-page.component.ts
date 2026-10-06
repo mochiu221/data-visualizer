@@ -14,6 +14,8 @@ interface Visualization {
   request: string;
   query?: string;
   queryParameters?: Array<string | number | boolean>;
+  total?: number;
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number };
   source: string;
   type: 'bar' | 'line' | 'donut' | 'table';
   data: Array<Record<string, string | number>>;
@@ -38,6 +40,12 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   loading = true;
   error = '';
   filterValues: Record<string, FilterValue> = {};
+  tableCanScrollLeft = false;
+  tableCanScrollRight = false;
+  private tableDragStartX = 0;
+  private tableDragStartScrollLeft = 0;
+  private tableDragElement?: HTMLElement;
+  private tableDragging = false;
   private lineCanvas?: ElementRef<HTMLCanvasElement>;
   private lineChart?: Chart<'line', number[] | Array<{ x: string; y: number }>, string>;
 
@@ -66,17 +74,17 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!id) { this.error = 'Visualization not found.'; this.loading = false; return; }
     this.loading = true;
     this.http.get<Visualization>(`${this.apiUrl}/visualizations/${id}`).subscribe({
-      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); },
+      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.status === 404 ? 'Visualization not found.' : response.error?.message ?? 'Could not load the visualization.'; this.loading = false; }
     });
   }
 
-  applyFilters(): void {
+  applyFilters(page = 1): void {
     if (!this.visualization) return;
     this.loading = true;
     this.error = '';
-    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues }).subscribe({
-      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); },
+    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not apply filters.'; this.loading = false; }
     });
   }
@@ -84,6 +92,56 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   clearFilters(): void {
     for (const field of Object.keys(this.filterValues)) this.filterValues[field] = null;
     this.applyFilters();
+  }
+
+  goToTablePage(page: number): void {
+    const pagination = this.visualization?.pagination;
+    if (!pagination || page < 1 || page > pagination.totalPages || page === pagination.page) return;
+    if (!this.visualization) return;
+    this.loading = true;
+    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); },
+      error: (response) => { this.error = response.error?.message ?? 'Could not load that page.'; this.loading = false; }
+    });
+  }
+
+  updateTableScrollState(event: Event): void {
+    const element = event.currentTarget as HTMLElement;
+    this.tableCanScrollLeft = element.scrollLeft > 1;
+    this.tableCanScrollRight = element.scrollLeft + element.clientWidth < element.scrollWidth - 1;
+  }
+
+  startTableDrag(event: MouseEvent): void {
+    const element = event.currentTarget as HTMLElement;
+    this.tableDragElement = element;
+    this.tableDragStartX = event.clientX;
+    this.tableDragStartScrollLeft = element.scrollLeft;
+    this.tableDragging = false;
+  }
+
+  moveTableDrag(event: MouseEvent): void {
+    if (!this.tableDragElement || event.buttons !== 1) return;
+    const distance = event.clientX - this.tableDragStartX;
+    if (Math.abs(distance) > 3) this.tableDragging = true;
+    this.tableDragElement.scrollLeft = this.tableDragStartScrollLeft - distance;
+  }
+
+  endTableDrag(): void {
+    this.tableDragElement = undefined;
+    this.tableDragging = false;
+  }
+
+  suppressTableClick(event: MouseEvent): void {
+    if (this.tableDragging) event.preventDefault();
+  }
+
+  private scheduleTableScrollStateUpdate(): void {
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        const element = document.querySelector<HTMLElement>('.table-scroll');
+        if (element) this.updateTableScrollState({ currentTarget: element } as unknown as Event);
+      });
+    });
   }
 
   setFilterValue(control: Visualization['filterControls'][number], value: FilterValue): void {

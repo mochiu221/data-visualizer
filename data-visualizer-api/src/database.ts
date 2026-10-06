@@ -274,3 +274,35 @@ export async function queryPreview(connection: Connection, source: string, plan:
         await connectionHandle.end();
     }
 }
+
+export async function countPreview(connection: Connection, source: string, plan: QueryPlan): Promise<number> {
+    const password = decrypt(connection.password);
+    if (connection.type === 'mongodb') {
+        if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
+        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        try {
+            await client.connect();
+            const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
+                const value = filter.type === 'datetime' && typeof filter.value === 'string' ? new Date(`${filter.value.replace(' ', 'T')}Z`) : filter.value;
+                if (filter.operator === 'contains') result[filter.field] = { $regex: String(filter.value), $options: 'i' };
+                else if (filter.operator === 'eq') result[filter.field] = value;
+                else result[filter.field] = { [({ neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator])]: value };
+                return result;
+            }, {});
+            return await client.db(connection.database).collection(source).countDocuments(filters);
+        } finally { await client.close(); }
+    }
+    const dialect = connection.type;
+    const filters = buildSqlFilters(plan, dialect);
+    const table = dialect === 'mssql' ? quoteIdentifier(source) : quoteField(source, dialect);
+    if (dialect === 'mssql') {
+        const pool = await sql.connect({ user: connection.username, password, server: connection.host, port: connection.port, database: connection.database, options: { encrypt: connection.tls, trustServerCertificate: !connection.tls }, requestTimeout: 10_000 });
+        try { const requestHandle = pool.request(); filters.values.forEach((value, index) => requestHandle.input(`p${index}`, value)); const result = await requestHandle.query(`SELECT COUNT(*) AS total FROM ${table}${filters.where}`); return Number(result.recordset[0].total); } finally { await pool.close(); }
+    }
+    if (dialect === 'postgresql') {
+        const client = new pg.Client({ host: connection.host, port: connection.port, database: connection.database, user: connection.username, password, ssl: connection.tls ? { rejectUnauthorized: false } : false, statement_timeout: 10_000 });
+        try { await client.connect(); const result = await client.query(`SELECT COUNT(*) AS total FROM ${table}${filters.where}`, filters.values); return Number(result.rows[0].total); } finally { await client.end(); }
+    }
+    const connectionHandle = await mysql.createConnection({ host: connection.host, port: connection.port, database: connection.database, user: connection.username, password, ssl: connection.tls ? {} : undefined, connectTimeout: 10_000 });
+    try { const [rows] = await connectionHandle.query(`SELECT COUNT(*) AS total FROM ${table}${filters.where}`, filters.values); return Number((rows as Array<{ total: number }>)[0].total); } finally { await connectionHandle.end(); }
+}
