@@ -53,6 +53,7 @@ export type ChartDefinition = z.infer<typeof chartDefinitionSchema>;
 export type Visualization = z.infer<typeof visualizationInput> & { id: string; createdAt: string; updatedAt: string; schema: SchemaColumn[]; queryPlan: QueryPlan; filterControls: FilterControl[]; chart?: ChartDefinition };
 
 export const queryPlanSchema = z.object({
+    select: z.array(z.string().min(1).max(80)).max(50).default([]),
     filters: z.array(z.object({ field: z.string().min(1).max(80), operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains']), value: z.union([z.string(), z.number(), z.boolean()]), type: z.enum(['text', 'number', 'boolean', 'date', 'time', 'datetime']).optional() })).max(10).default([]),
     groupBy: z.array(z.string().min(1).max(80)).max(5).default([]),
     sort: z.object({ field: z.string().min(1).max(80), direction: z.enum(['asc', 'desc']) }).nullable().default(null),

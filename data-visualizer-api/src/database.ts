@@ -140,7 +140,7 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
 
 function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): { select: string; groupBy: string } {
     const groupedFields = plan.groupBy.map((field) => quoteField(field, dialect));
-    if (!groupedFields.length) return { select: '*', groupBy: '' };
+    if (!groupedFields.length) return { select: plan.select.length ? plan.select.map((field) => quoteField(field, dialect)).join(', ') : '*', groupBy: '' };
     const aggregation = chart?.yAggregation ?? 'count';
     if (aggregation === 'count' || aggregation === 'none' || !chart?.yAxis.field) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
     const functionName = { sum: 'SUM', average: 'AVG', min: 'MIN', max: 'MAX' }[aggregation];
@@ -151,6 +151,7 @@ function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefine
 export function buildPreviewQuery(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): string {
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
+        plan.select.forEach((field) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Selected field contains invalid characters.'); });
         const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
             const existing = result[filter.field];
             if (filter.operator === 'contains') {
@@ -172,7 +173,8 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
             return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, [outputField]: value } })}])`;
         }
         const sort = plan.sort ? `.sort(${JSON.stringify({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 })})` : '';
-        return `db.${source}.find(${JSON.stringify(filters)})${sort}.skip(${(plan.page - 1) * plan.pageSize}).limit(${plan.pageSize})`;
+        const projection = plan.select.length ? `, ${JSON.stringify(Object.fromEntries(plan.select.map((field) => [field, 1])))}` : '';
+        return `db.${source}.find(${JSON.stringify(filters)}${projection})${sort}.skip(${(plan.page - 1) * plan.pageSize}).limit(${plan.pageSize})`;
     }
     const dialect = connection.type;
     const filters = buildSqlFilters(plan, dialect);
@@ -213,7 +215,10 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 return result;
             }, {});
             if (plan.groupBy.length) {
-                const groupId = Object.fromEntries(plan.groupBy.map((field) => [field, `$${field}`]));
+                const groupId = Object.fromEntries(plan.groupBy.map((field) => {
+                    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
+                    return [field, `$${field}`];
+                }));
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
                     { $group: { _id: groupId, ...(chart?.yAggregation === 'sum' ? { [chart.yAxis.field]: { $sum: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'average' ? { [chart.yAxis.field]: { $avg: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'min' ? { [chart.yAxis.field]: { $min: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'max' ? { [chart.yAxis.field]: { $max: `$${chart.yAxis.field}` } } : { count: { $sum: 1 } }) } },
@@ -222,7 +227,9 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 ]).toArray();
                 return grouped.map((row) => ({ ...row._id as Record<string, unknown>, ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id')) }));
             }
-            const cursor = client.db(connection.database).collection(source).find(filters).skip((plan.page - 1) * plan.pageSize).limit(plan.pageSize);
+            plan.select.forEach((field) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Selected field contains invalid characters.'); });
+            const projection = plan.select.length ? { projection: Object.fromEntries(plan.select.map((field) => [field, 1])) } : undefined;
+            const cursor = client.db(connection.database).collection(source).find(filters, projection).skip((plan.page - 1) * plan.pageSize).limit(plan.pageSize);
             if (plan.sort) cursor.sort({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 });
             const documents = await cursor.toArray();
             return documents.map(normalizePreview);

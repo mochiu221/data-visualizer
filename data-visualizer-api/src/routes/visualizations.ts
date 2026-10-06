@@ -70,7 +70,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         let sampleRows: Array<Record<string, string | number>>;
         try {
             schema = await discoverSchema(connection, parsed.data.source);
-            sampleRows = await queryPreview(connection, parsed.data.source, { filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 });
+            sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Schema discovery or sample-row query failed.';
             app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery or sample-row query failed');
@@ -87,6 +87,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const schemaFields = new Set(schema.map((column) => column.name));
         const controlFields = new Set(definition.filterControls.map((control) => control.field));
         const invalidFields = [
+            ...definition.queryPlan.select,
             ...definition.filterControls.map((control) => control.field),
             ...definition.queryPlan.filters.map((filter) => filter.field),
             ...(definition.queryPlan.sort ? [definition.queryPlan.sort.field] : [])

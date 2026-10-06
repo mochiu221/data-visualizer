@@ -21,7 +21,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
     const prompt = [
         'Create a safe database query plan and visualization definition from the user request.',
         'Return JSON only. Never return SQL, JavaScript, executable code, or arbitrary operators.',
-        'The JSON shape must be: {"queryPlan":{"filters":[{"field":string,"operator":"eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"contains","value":string|number|boolean}],"groupBy":[string],"sort":{"field":string,"direction":"asc"|"desc"}|null,"page":number,"pageSize":number},"filterControls":[{"field":string,"label":string,"type":"text"|"number"|"boolean"|"date"|"time"|"datetime","operator":"eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"contains","range":"from"|"to"}],"title":string,"type":"bar"|"line"|"donut"|"table","chart":{"xAxis":{"field":string,"label":string,"scale":"category"|"time","timeUnit":"millisecond"|"second"|"minute"|"hour"|"day"|"week"|"month"|"quarter"|"year"},"yAxis":{"field":string,"label":string,"scale":"category"|"time"},"yAggregation":"none"|"count"|"sum"|"average"|"min"|"max"}}.',
+        'The JSON shape must be: {"queryPlan":{"select":[string],"filters":[{"field":string,"operator":"eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"contains","value":string|number|boolean}],"groupBy":[string],"sort":{"field":string,"direction":"asc"|"desc"}|null,"page":number,"pageSize":number},"filterControls":[{"field":string,"label":string,"type":"text"|"number"|"boolean"|"date"|"time"|"datetime","operator":"eq"|"neq"|"gt"|"gte"|"lt"|"lte"|"contains","range":"from"|"to"}],"title":string,"type":"bar"|"line"|"donut"|"table","chart":{"xAxis":{"field":string,"label":string,"scale":"category"|"time","timeUnit":"millisecond"|"second"|"minute"|"hour"|"day"|"week"|"month"|"quarter"|"year"},"yAxis":{"field":string,"label":string,"scale":"category"|"time"},"yAggregation":"none"|"count"|"sum"|"average"|"min"|"max"}}.',
         'Use page >= 1 and pageSize between 1 and 1000.',
         `Schema: ${JSON.stringify(schema)}`,
         `Example rows (up to 5, read-only sample data; use only to understand actual values and distributions): ${JSON.stringify(sampleRows.slice(0, 5))}`,
@@ -33,6 +33,9 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '- Use table when the request needs row-level detail, several dimensions, several measures, or when no chart communicates the result clearly.',
         '- Do not choose a chart type solely because it is available; match the type to the query result shape and the user request.',
         '- Use queryPlan.groupBy for categorical or time dimensions that must be grouped before counting; every groupBy field must exist in the schema.',
+        '- Use queryPlan.select for the fields that should be returned. For row-level tables, include every requested detail field; use an empty array only when all source fields are needed.',
+        '- When queryPlan.groupBy is non-empty, keep the group dimensions in the result and use chart.yAggregation for the grouped measure.',
+        '- Every queryPlan.select field must exist in the source schema. When queryPlan.groupBy is non-empty, include every groupBy field in select so the grouped dimensions are visible.',
         '- When grouping and the request asks for a numeric measure, use chart.yAxis.field for that measure even when it is not in groupBy, and set yAggregation to sum, average, min, or max as appropriate.',
         '- Keep groupBy empty for row-level detail or when grouping is not requested.',
         '- Always provide chart.xAxis.field and chart.xAxis.label for the horizontal/category/time dimension.',
