@@ -3,7 +3,7 @@ import mysql from 'mysql2/promise';
 import pg from 'pg';
 import sql from 'mssql';
 import { decrypt } from './security.js';
-import type { Connection, QueryPlan, SchemaColumn, TableSource } from './models.js';
+import type { ChartDefinition, Connection, QueryPlan, SchemaColumn, TableSource } from './models.js';
 
 export function quoteIdentifier(identifier: string): string {
     identifier = identifier.replace(/^\[([A-Za-z_][A-Za-z0-9_$]*)\](?:\.\[([A-Za-z_][A-Za-z0-9_$]*)\])?$/, (_, first: string, second?: string) => second ? `${first}.${second}` : first);
@@ -138,7 +138,17 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
     return { values, where: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '' };
 }
 
-export function buildPreviewQuery(connection: Connection, source: string, plan: QueryPlan): string {
+function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): { select: string; groupBy: string } {
+    const groupedFields = plan.groupBy.map((field) => quoteField(field, dialect));
+    if (!groupedFields.length) return { select: '*', groupBy: '' };
+    const aggregation = chart?.yAggregation ?? 'count';
+    if (aggregation === 'count' || aggregation === 'none' || !chart?.yAxis.field) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
+    const functionName = { sum: 'SUM', average: 'AVG', min: 'MIN', max: 'MAX' }[aggregation];
+    const measure = quoteField(chart.yAxis.field, dialect);
+    return { select: `${groupedFields.join(', ')}, ${functionName}(${measure}) AS ${measure}`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
+}
+
+export function buildPreviewQuery(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): string {
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
         const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
@@ -155,7 +165,11 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
         }, {});
         if (plan.groupBy.length) {
             const group = Object.fromEntries(plan.groupBy.map((field) => [`${field}`, `$${field}`]));
-            return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, count: { $sum: 1 } } })}])`;
+            const aggregation = chart?.yAggregation ?? 'count';
+            const measure = chart?.yAxis.field;
+            const value = aggregation === 'sum' ? { $sum: `$${measure}` } : aggregation === 'average' ? { $avg: `$${measure}` } : aggregation === 'min' ? { $min: `$${measure}` } : aggregation === 'max' ? { $max: `$${measure}` } : { $sum: 1 };
+            const outputField = aggregation === 'count' || !measure ? 'count' : measure;
+            return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, [outputField]: value } })}])`;
         }
         const sort = plan.sort ? `.sort(${JSON.stringify({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 })})` : '';
         return `db.${source}.find(${JSON.stringify(filters)})${sort}.skip(${(plan.page - 1) * plan.pageSize}).limit(${plan.pageSize})`;
@@ -163,19 +177,21 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
     const dialect = connection.type;
     const filters = buildSqlFilters(plan, dialect);
     const table = dialect === 'mssql' ? quoteIdentifier(source) : quoteField(source, dialect);
-    const groupedFields = plan.groupBy.map((field) => quoteField(field, dialect));
-    const select = groupedFields.length ? `${groupedFields.join(', ')}, COUNT(*) AS count` : '*';
-    const groupBy = groupedFields.length ? ` GROUP BY ${groupedFields.join(', ')}` : '';
+    const projection = groupedSqlProjection(plan, chart, dialect);
     const sort = plan.sort
         ? ` ORDER BY ${quoteField(plan.sort.field, dialect)} ${plan.sort.direction.toUpperCase()}`
         : dialect === 'mssql' ? ' ORDER BY (SELECT NULL)' : '';
     const pagination = dialect === 'mssql'
         ? ` OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`
         : ` LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`;
-    return `SELECT ${select} FROM ${table}${filters.where}${groupBy}${sort}${pagination}`;
+    return `SELECT ${projection.select} FROM ${table}${filters.where}${projection.groupBy}${sort}${pagination}`;
 }
 
-export async function queryPreview(connection: Connection, source: string, plan: QueryPlan): Promise<Array<Record<string, string | number>>> {
+export function buildPreviewParameters(connection: Connection, plan: QueryPlan): Array<string | number | boolean> {
+    return connection.type === 'mongodb' ? [] : buildSqlFilters(plan, connection.type).values;
+}
+
+export async function queryPreview(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): Promise<Array<Record<string, string | number>>> {
     const password = decrypt(connection.password);
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
@@ -200,11 +216,11 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 const groupId = Object.fromEntries(plan.groupBy.map((field) => [field, `$${field}`]));
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
-                    { $group: { _id: groupId, count: { $sum: 1 } } },
+                    { $group: { _id: groupId, ...(chart?.yAggregation === 'sum' ? { [chart.yAxis.field]: { $sum: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'average' ? { [chart.yAxis.field]: { $avg: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'min' ? { [chart.yAxis.field]: { $min: `$${chart.yAxis.field}` } } : chart?.yAggregation === 'max' ? { [chart.yAxis.field]: { $max: `$${chart.yAxis.field}` } } : { count: { $sum: 1 } }) } },
                     { $skip: (plan.page - 1) * plan.pageSize },
                     { $limit: plan.pageSize }
                 ]).toArray();
-                return grouped.map((row) => ({ ...row._id as Record<string, unknown>, count: row.count as number }));
+                return grouped.map((row) => ({ ...row._id as Record<string, unknown>, ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id')) }));
             }
             const cursor = client.db(connection.database).collection(source).find(filters).skip((plan.page - 1) * plan.pageSize).limit(plan.pageSize);
             if (plan.sort) cursor.sort({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 });
@@ -221,13 +237,11 @@ export async function queryPreview(connection: Connection, source: string, plan:
             const filters = buildSqlFilters(plan, 'mssql');
             const requestHandle = pool.request();
             filters.values.forEach((value, index) => requestHandle.input(`p${index}`, value));
-            const groupedFields = plan.groupBy.map((field) => quoteField(field, 'mssql'));
-            const select = groupedFields.length ? `${groupedFields.join(', ')}, COUNT(*) AS count` : '*';
-            const groupBy = groupedFields.length ? ` GROUP BY ${groupedFields.join(', ')}` : '';
+            const projection = groupedSqlProjection(plan, chart, 'mssql');
             const sort = plan.sort
                 ? ` ORDER BY ${quoteField(plan.sort.field, 'mssql')} ${plan.sort.direction.toUpperCase()}`
                 : ' ORDER BY (SELECT NULL)';
-            const result = await requestHandle.query(`SELECT ${select} FROM ${quoteIdentifier(source)}${filters.where}${groupBy}${sort} OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`);
+            const result = await requestHandle.query(`SELECT ${projection.select} FROM ${quoteIdentifier(source)}${filters.where}${projection.groupBy}${sort} OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`);
             return result.recordset.map(normalizePreview);
         } finally {
             await pool.close();
@@ -239,11 +253,9 @@ export async function queryPreview(connection: Connection, source: string, plan:
         try {
             await client.connect();
             const filters = buildSqlFilters(plan, 'postgresql');
-            const groupedFields = plan.groupBy.map((field) => quoteField(field, 'postgresql'));
-            const select = groupedFields.length ? `${groupedFields.join(', ')}, COUNT(*) AS count` : '*';
-            const groupBy = groupedFields.length ? ` GROUP BY ${groupedFields.join(', ')}` : '';
+            const projection = groupedSqlProjection(plan, chart, 'postgresql');
             const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'postgresql')} ${plan.sort.direction.toUpperCase()}` : '';
-            const result = await client.query(`SELECT ${select} FROM ${quoteField(source, 'postgresql')}${filters.where}${groupBy}${sort} LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`, filters.values);
+            const result = await client.query(`SELECT ${projection.select} FROM ${quoteField(source, 'postgresql')}${filters.where}${projection.groupBy}${sort} LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`, filters.values);
             return result.rows.map(normalizePreview);
         } finally {
             await client.end();
@@ -253,11 +265,9 @@ export async function queryPreview(connection: Connection, source: string, plan:
     const connectionHandle = await mysql.createConnection({ host: connection.host, port: connection.port, database: connection.database, user: connection.username, password, ssl: connection.tls ? {} : undefined, connectTimeout: 10_000 });
     try {
         const filters = buildSqlFilters(plan, 'mysql');
-        const groupedFields = plan.groupBy.map((field) => quoteField(field, 'mysql'));
-        const select = groupedFields.length ? `${groupedFields.join(', ')}, COUNT(*) AS count` : '*';
-        const groupBy = groupedFields.length ? ` GROUP BY ${groupedFields.join(', ')}` : '';
+        const projection = groupedSqlProjection(plan, chart, 'mysql');
         const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'mysql')} ${plan.sort.direction.toUpperCase()}` : '';
-        const [rows] = await connectionHandle.query(`SELECT ${select} FROM ${quoteField(source, 'mysql')}${filters.where}${groupBy}${sort} LIMIT ? OFFSET ?`, [...filters.values, plan.pageSize, (plan.page - 1) * plan.pageSize]);
+        const [rows] = await connectionHandle.query(`SELECT ${projection.select} FROM ${quoteField(source, 'mysql')}${filters.where}${projection.groupBy}${sort} LIMIT ? OFFSET ?`, [...filters.values, plan.pageSize, (plan.page - 1) * plan.pageSize]);
         const records = rows as Array<Record<string, unknown>>;
         return records.map(normalizePreview);
     } finally {

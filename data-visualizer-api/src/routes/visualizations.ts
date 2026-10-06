@@ -4,9 +4,17 @@ import { aiProvider, metadataDb } from '../config.js';
 import { connections, generatedDefinition, visualizationInput, visualizations, type SchemaColumn, type Visualization } from '../models.js';
 import { generateDefinition } from '../ai.js';
 import { applyFilterValues } from '../filters.js';
-import { buildPreviewQuery, discoverSchema, queryPreview } from '../database.js';
+import { buildPreviewParameters, buildPreviewQuery, discoverSchema, queryPreview } from '../database.js';
 
 export function registerVisualizationRoutes(app: FastifyInstance): void {
+    const drafts = new Map<string, Visualization>();
+    const persistVisualization = async (visualization: Visualization): Promise<void> => {
+        if (metadataDb) {
+            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
+        }
+        visualizations.unshift(visualization);
+    };
+
     app.get('/api/visualizations', async () => visualizations.map(({ schema, queryPlan, ...item }) => item));
     
     app.get('/api/visualizations/:id', async (request, reply) => {
@@ -15,8 +23,8 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         try {
             const connection = connections.find((item) => item.id === visualization.connectionId);
             if (!connection) return reply.code(404).send({ message: 'The visualization connection no longer exists.' });
-            const data = await queryPreview(connection, visualization.source, visualization.queryPlan);
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, visualization.queryPlan), data };
+            const data = await queryPreview(connection, visualization.source, visualization.queryPlan, visualization.chart);
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, visualization.queryPlan, visualization.chart), queryParameters: buildPreviewParameters(connection, visualization.queryPlan), data };
         } catch (error) {
             return reply.code(502).send({ message: error instanceof Error ? error.message : 'Visualization query failed.' });
         }
@@ -29,30 +37,42 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const connection = connections.find((item) => item.id === visualization.connectionId);
             if (!connection) return reply.code(404).send({ message: 'The visualization connection no longer exists.' });
             const plan = applyFilterValues(visualization, (request.body as { filters?: unknown } | undefined)?.filters ?? {});
-            const data = await queryPreview(connection, visualization.source, plan);
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan), queryPlan: plan, data };
+            const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, data };
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Visualization query failed.';
             return reply.code(message.startsWith('Filter') || message.startsWith('Invalid') ? 400 : 502).send({ message });
         }
     });
     
+    app.post('/api/visualizations/confirm', async (request, reply) => {
+        const parsed = z.object({ draftId: z.string().uuid() }).safeParse(request.body);
+        if (!parsed.success) return reply.code(400).send({ message: 'Invalid visualization draft.' });
+        const visualization = drafts.get(parsed.data.draftId);
+        if (!visualization) return reply.code(404).send({ message: 'Visualization draft not found or already saved.' });
+        drafts.delete(parsed.data.draftId);
+        await persistVisualization(visualization);
+        return reply.code(201).send(visualization);
+    });
+
     app.post('/api/visualizations/generate', async (request, reply) => {
         const parsed = visualizationInput.safeParse(request.body);
         if (!parsed.success) return reply.code(400).send({ message: 'Invalid visualization request', issues: parsed.error.flatten() });
         const connection = connections.find((item) => item.id === parsed.data.connectionId);
         if (!connection) return reply.code(404).send({ message: 'Select a saved database connection before generating a visualization.' });
         let schema: SchemaColumn[];
+        let sampleRows: Array<Record<string, string | number>>;
         try {
             schema = await discoverSchema(connection, parsed.data.source);
+            sampleRows = await queryPreview(connection, parsed.data.source, { filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 });
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Schema discovery failed.';
-            app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery failed');
+            const message = error instanceof Error ? error.message : 'Schema discovery or sample-row query failed.';
+            app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery or sample-row query failed');
             return reply.code(502).send({ message });
         }
         let definition: z.infer<typeof generatedDefinition>;
         try {
-            definition = await generateDefinition(parsed.data, schema);
+            definition = await generateDefinition(parsed.data, schema, sampleRows);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'AI visualization definition failed.';
             app.log.error({ error: message, provider: aiProvider }, 'AI visualization definition failed');
@@ -81,11 +101,17 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         }
         const now = new Date().toISOString();
         const visualization: Visualization = { ...parsed.data, type: definition.type, title: definition.title, id: crypto.randomUUID(), createdAt: now, updatedAt: now, schema, queryPlan: definition.queryPlan, filterControls: definition.filterControls, chart: definition.chart };
-        if (metadataDb) {
-            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
-        }
-        visualizations.unshift(visualization);
-        return reply.code(201).send(visualization);
+        const draftId = crypto.randomUUID();
+        drafts.set(draftId, visualization);
+        return reply.send({
+            draftId,
+            definition,
+            visualization: {
+                ...visualization,
+                query: buildPreviewQuery(connection, visualization.source, visualization.queryPlan, visualization.chart),
+                queryParameters: buildPreviewParameters(connection, visualization.queryPlan)
+            }
+        });
     });
     
     app.delete('/api/visualizations/:id', async (request, reply) => {

@@ -9,6 +9,12 @@ type ChartType = 'bar' | 'line' | 'donut' | 'table';
 interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface Visualization { id: string; title: string; source: string; type: ChartType; }
+interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; }
+interface QueryPlanPreview { filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
+interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAggregation: string; }
+interface VisualizationDefinitionPreview { queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; title: string; type: ChartType; chart: ChartPreview; }
+interface VisualizationPreview extends Visualization { request: string; connectionId: string; query: string; queryParameters: Array<string | number | boolean>; queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; chart: ChartPreview; schema: unknown; }
+interface VisualizationDraftResponse { draftId: string; definition: VisualizationDefinitionPreview; visualization: VisualizationPreview; }
 
 @Component({
   selector: 'app-root',
@@ -29,11 +35,15 @@ export class AppComponent implements OnInit {
   isSaving = false;
   isTestingNewConnection = false;
   isGenerating = false;
+  isConfirmingDraft = false;
   testedConnectionFingerprint = '';
   connectionTestMessage = '';
   connectionTestFailed = false;
   apiOnline = false;
   notice = '';
+  pendingDraftId = '';
+  pendingVisualization?: VisualizationPreview;
+  pendingDefinition?: VisualizationDefinitionPreview;
   schemaColumns: Array<{ name: string; type: string }> = [];
   tables: TableSource[] = [];
   isLoadingTables = false;
@@ -90,8 +100,17 @@ export class AppComponent implements OnInit {
     if (!this.query.source.trim()) { this.notice = 'Select a table or collection before creating a visualization.'; return; }
     if (!this.query.request.trim()) { this.notice = 'Describe what you want to see before creating a visualization.'; return; }
     this.isGenerating = true;
-    this.http.post<Visualization>(`${this.apiUrl}/visualizations/generate`, { ...this.query, title: this.query.request }).subscribe({ next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.isGenerating = false; this.activeView = 'overview'; this.notice = 'Visualization generated from a live database query.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The database preview or visualization could not be generated.'; } });
+    this.http.post<VisualizationDraftResponse>(`${this.apiUrl}/visualizations/generate`, { ...this.query, title: this.query.request }).subscribe({ next: (draft) => { this.pendingDraftId = draft.draftId; this.pendingDefinition = draft.definition; this.pendingVisualization = draft.visualization; this.isGenerating = false; this.notice = 'Review the generated definition before saving it.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The visualization definition could not be generated.'; } });
   }
+  confirmVisualization(): void {
+    if (!this.pendingDraftId) return;
+    this.isConfirmingDraft = true;
+    this.http.post<Visualization>(`${this.apiUrl}/visualizations/confirm`, { draftId: this.pendingDraftId }).subscribe({
+      next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.isConfirmingDraft = false; this.activeView = 'overview'; this.notice = 'Visualization saved.'; },
+      error: (response) => { this.isConfirmingDraft = false; this.notice = response.error?.message ?? 'Could not save the visualization.'; }
+    });
+  }
+  discardVisualizationDraft(): void { this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.notice = ''; }
   deleteVisualization(id: string): void { this.http.delete(`${this.apiUrl}/visualizations/${id}`).subscribe({ next: () => this.visualizations = this.visualizations.filter((item) => item.id !== id) }); }
   iconFor(type: DatabaseType): string { return type === 'mongodb' ? '◇' : type === 'mssql' ? '▦' : type === 'mysql' ? '◈' : '◉'; }
   chartValue(item: Record<string, string | number>): number { return Number(Object.values(item).find((value) => typeof value === 'number') ?? 0); }

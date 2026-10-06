@@ -13,12 +13,13 @@ interface Visualization {
   title: string;
   request: string;
   query?: string;
+  queryParameters?: Array<string | number | boolean>;
   source: string;
   type: 'bar' | 'line' | 'donut' | 'table';
   data: Array<Record<string, string | number>>;
   schema?: Array<{ name: string; type: string }>;
   chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAggregation: string };
-  filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string }>;
+  filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to' }>;
   queryPlan?: { page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
 }
 type FilterValue = string | number | boolean | null;
@@ -89,6 +90,19 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     this.filterValues[this.filterKey(control)] = value;
   }
 
+  filterGroups(): Array<{ key: string; controls: Visualization['filterControls'] }> {
+    const groups = new Map<string, Visualization['filterControls']>();
+    for (const control of this.visualization?.filterControls ?? []) {
+      const key = this.isRangeControl(control) ? `range::${control.field}` : this.filterKey(control);
+      groups.set(key, [...(groups.get(key) ?? []), control]);
+    }
+    return [...groups.entries()].map(([key, controls]) => ({ key, controls }));
+  }
+
+  isRangeControl(control: Visualization['filterControls'][number]): boolean {
+    return Boolean(control.range) || (['number', 'date', 'datetime'].includes(control.type) && ['gt', 'gte', 'lt', 'lte'].includes(control.operator));
+  }
+
   private scheduleLineChartRender(): void {
     setTimeout(() => this.renderLineChart());
   }
@@ -153,6 +167,8 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     return `${control.field}::${control.operator}`;
   }
 
+  trackFilterGroup(_index: number, group: { key: string }): string { return group.key; }
+
   chartValue(item: Record<string, string | number>): number { const field = this.visualization?.chart?.yAxis.field; return Number(field ? item[field] ?? 0 : Object.values(item).find((value) => typeof value === 'number') ?? 0); }
   displayValue(value: string | number): string {
     if (typeof value !== 'string') return String(value);
@@ -177,4 +193,6 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   donutPercent(item: Record<string, string | number>): number { const total = this.donutTotal(); return total ? Math.round((Math.max(this.chartValue(item), 0) / total) * 100) : 0; }
   keys(): string[] { return this.visualization?.data[0] ? Object.keys(this.visualization.data[0]) : []; }
   sortSummary(): string { const sort = this.visualization?.queryPlan?.sort; return sort ? `${sort.field} ${sort.direction}` : 'Default order'; }
+  queryParameterName(index: number): string { return `p${index}`; }
+  queryParameterValue(value: string | number | boolean): string { return typeof value === 'string' ? JSON.stringify(value) : String(value); }
 }
