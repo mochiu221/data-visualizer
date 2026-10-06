@@ -87,7 +87,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const schemaFields = new Set(schema.map((column) => column.name));
         const controlFields = new Set(definition.filterControls.map((control) => control.field));
         const invalidFields = [
-            ...definition.queryPlan.select,
+            ...definition.queryPlan.select.map((selection) => selection.field),
             ...definition.filterControls.map((control) => control.field),
             ...definition.queryPlan.filters.map((filter) => filter.field),
             ...(definition.queryPlan.sort ? [definition.queryPlan.sort.field] : [])
