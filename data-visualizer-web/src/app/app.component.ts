@@ -8,7 +8,7 @@ type DatabaseType = 'mssql' | 'mongodb' | 'postgresql' | 'mysql';
 type ChartType = 'bar' | 'line' | 'donut' | 'table';
 interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
-interface Visualization { id: string; title: string; source: string; type: ChartType; }
+interface Visualization { id: string; title: string; source: string; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; }
 interface QueryPlanPreview { filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAggregation: string; }
@@ -44,6 +44,7 @@ export class AppComponent implements OnInit {
   pendingDraftId = '';
   pendingVisualization?: VisualizationPreview;
   pendingDefinition?: VisualizationDefinitionPreview;
+  visualizationToDelete?: Visualization;
   schemaColumns: Array<{ name: string; type: string }> = [];
   tables: TableSource[] = [];
   isLoadingTables = false;
@@ -111,7 +112,16 @@ export class AppComponent implements OnInit {
     });
   }
   discardVisualizationDraft(): void { this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.notice = ''; }
-  deleteVisualization(id: string): void { this.http.delete(`${this.apiUrl}/visualizations/${id}`).subscribe({ next: () => this.visualizations = this.visualizations.filter((item) => item.id !== id) }); }
+  requestDeleteVisualization(visualization: Visualization): void { this.visualizationToDelete = visualization; }
+  cancelDeleteVisualization(): void { this.visualizationToDelete = undefined; }
+  deleteVisualization(): void {
+    const visualization = this.visualizationToDelete;
+    if (!visualization) return;
+    this.http.delete(`${this.apiUrl}/visualizations/${visualization.id}`).subscribe({
+      next: () => { this.visualizations = this.visualizations.filter((item) => item.id !== visualization.id); this.visualizationToDelete = undefined; this.notice = 'Visualization deleted.'; },
+      error: (response) => { this.notice = response.error?.message ?? 'Could not delete the visualization.'; }
+    });
+  }
   iconFor(type: DatabaseType): string { return type === 'mongodb' ? '◇' : type === 'mssql' ? '▦' : type === 'mysql' ? '◈' : '◉'; }
   chartValue(item: Record<string, string | number>): number { return Number(Object.values(item).find((value) => typeof value === 'number') ?? 0); }
   chartLabel(item: Record<string, string | number>): string { return String(Object.values(item).find((value) => typeof value === 'string') ?? ''); }
