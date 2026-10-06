@@ -93,8 +93,8 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             ...(definition.queryPlan.sort ? [definition.queryPlan.sort.field] : [])
             , ...definition.queryPlan.groupBy
             , definition.chart.xAxis.field,
-            ...(definition.chart.yAggregation === 'count' && definition.chart.yAxis.field === 'count' ? [] : [definition.chart.yAxis.field])
-        ].filter((field) => !schemaFields.has(field));
+            ...(definition.chart.yAxes?.length ? definition.chart.yAxes.map((axis) => axis.field) : [definition.chart.yAxis.field])
+        ].filter((field) => !(definition.chart.yAggregation === 'count' && field === 'count') && !schemaFields.has(field));
         if (invalidFields.length) {
             return reply.code(502).send({ message: `The AI returned a field that is not in the source schema: ${invalidFields[0]}` });
         }

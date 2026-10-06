@@ -47,7 +47,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   private tableDragElement?: HTMLElement;
   private tableDragging = false;
   private lineCanvas?: ElementRef<HTMLCanvasElement>;
-  private lineChart?: Chart<'line', number[] | Array<{ x: string; y: number }>, string>;
+  private lineChart?: Chart<'line', (number | { x: string; y: number })[], string>;
 
   @ViewChild('lineCanvas')
   set lineCanvasElement(value: ElementRef<HTMLCanvasElement> | undefined) {
@@ -172,32 +172,42 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
       return;
     }
     this.lineChart?.destroy();
-    this.lineChart = new Chart(this.lineCanvas.nativeElement, {
+    const chart = this.visualization.chart;
+    const xAxisField = chart?.xAxis.field;
+    const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && typeof value === 'number').map(([field]) => field)))];
+    const yAxisField = chart?.yAxis.field;
+    const seriesFields = yAxisField && numericFields.includes(yAxisField)
+      ? [yAxisField, ...numericFields.filter((field) => field !== yAxisField)]
+      : numericFields;
+    const colors = ['#1f7055', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#73b58e'];
+    const isTimeScale = chart?.xAxis.scale === 'time';
+    this.lineChart = new Chart<'line', (number | { x: string; y: number })[], string>(this.lineCanvas.nativeElement, {
       type: 'line',
       data: {
-        labels: this.visualization.chart?.xAxis.scale === 'time' ? undefined : this.visualization.data.map((item) => this.chartLabel(item)),
-        datasets: [{
-          data: this.visualization.chart?.xAxis.scale === 'time'
-            ? this.visualization.data.map((item) => ({ x: this.chartTimeValue(item), y: this.chartValue(item) }))
-            : this.visualization.data.map((item) => this.chartValue(item)),
-          borderColor: '#1f7055',
-          backgroundColor: 'rgba(31, 112, 85, .08)',
+        labels: isTimeScale ? undefined : this.visualization.data.map((item) => this.chartLabel(item)),
+        datasets: seriesFields.map((field, index) => ({
+          label: field === yAxisField ? chart?.yAxis.label ?? field : field,
+          data: isTimeScale
+            ? this.visualization!.data.map((item) => ({ x: this.chartTimeValue(item), y: Number(item[field] ?? 0) }))
+            : this.visualization!.data.map((item) => Number(item[field] ?? 0)),
+          borderColor: colors[index % colors.length],
+          backgroundColor: `${colors[index % colors.length]}18`,
           borderWidth: 2,
           pointRadius: 4,
           pointHoverRadius: 5,
-          pointBackgroundColor: '#e27845',
+          pointBackgroundColor: colors[index % colors.length],
           pointBorderColor: '#ffffff',
           pointBorderWidth: 2,
           tension: .28,
-          fill: true
-        }]
+          fill: seriesFields.length === 1
+        }))
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { intersect: false, mode: 'index' },
         plugins: {
-          legend: { display: false },
+          legend: { display: seriesFields.length > 1, position: 'bottom', labels: { color: '#718078', usePointStyle: true, padding: 18 } },
           tooltip: { displayColors: false, padding: 10 }
         },
         scales: {

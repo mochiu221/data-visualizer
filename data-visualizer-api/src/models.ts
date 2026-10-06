@@ -45,6 +45,7 @@ export const chartAxisSchema = z.object({
 export const chartDefinitionSchema = z.object({
     xAxis: chartAxisSchema,
     yAxis: chartAxisSchema,
+    yAxes: z.array(chartAxisSchema).max(6).optional(),
     yAggregation: z.enum(['none', 'count', 'sum', 'average', 'min', 'max']).default('none')
 });
 
