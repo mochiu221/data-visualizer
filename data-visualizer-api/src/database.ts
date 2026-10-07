@@ -5,6 +5,11 @@ import sql from 'mssql';
 import { decrypt } from './security.js';
 import type { ChartDefinition, Connection, QueryPlan, SchemaColumn, SelectField, TableSource } from './models.js';
 
+function mongoConnectionUri(connection: Connection, password: string): string {
+    const credentials = connection.username && password ? `${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@` : '';
+    return `mongodb://${credentials}${connection.host}:${connection.port}`;
+}
+
 export function quoteIdentifier(identifier: string): string {
     identifier = identifier.replace(/^\[([A-Za-z_][A-Za-z0-9_$]*)\](?:\.\[([A-Za-z_][A-Za-z0-9_$]*)\])?$/, (_, first: string, second?: string) => second ? `${first}.${second}` : first);
     if (!/^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)?$/.test(identifier)) throw new Error('Table or collection name contains invalid characters.');
@@ -25,9 +30,9 @@ export function schemaSource(source: string): { schema?: string; table: string }
 }
 
 export async function listTables(connection: Connection): Promise<TableSource[]> {
-    const password = decrypt(connection.password);
+    const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
-        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
             const collections = await client.db(connection.database).listCollections({}, { nameOnly: true }).toArray();
@@ -60,9 +65,9 @@ export async function discoverSchema(connection: Connection, source: string): Pr
     const target = connection.type === 'mongodb'
         ? (/^[A-Za-z0-9_.-]+$/.test(source) ? { table: source } : (() => { throw new Error('Collection name contains invalid characters.'); })())
         : schemaSource(source);
-    const password = decrypt(connection.password);
+    const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
-        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
             const sample = await client.db(connection.database).collection(target.table).findOne();
@@ -99,9 +104,9 @@ export async function discoverSchema(connection: Connection, source: string): Pr
 }
 
 export async function verifyConnection(connection: Connection): Promise<void> {
-    const password = decrypt(connection.password);
+    const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
-        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try { await client.connect(); await client.db(connection.database).command({ ping: 1 }); } finally { await client.close(); }
         return;
     }
@@ -203,10 +208,10 @@ export function buildPreviewParameters(connection: Connection, plan: QueryPlan):
 }
 
 export async function queryPreview(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): Promise<Array<Record<string, string | number>>> {
-    const password = decrypt(connection.password);
+    const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
-        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
             const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
@@ -294,10 +299,10 @@ export async function queryPreview(connection: Connection, source: string, plan:
 }
 
 export async function countPreview(connection: Connection, source: string, plan: QueryPlan): Promise<number> {
-    const password = decrypt(connection.password);
+    const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
-        const client = new MongoClient(`mongodb://${encodeURIComponent(connection.username)}:${encodeURIComponent(password)}@${connection.host}:${connection.port}`, { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
             const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {

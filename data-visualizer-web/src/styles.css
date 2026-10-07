@@ -1,5 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 html, body { margin: 0; min-height: 100%; background: #f7f9f6; }
-body { font-family: 'DM Sans', Arial, sans-serif; }
+body { font-family: Arial, sans-serif; }
 button, input, textarea, select { font-family: inherit; }
 .schema-preview { display: grid; gap: 7px; padding: 12px; border: 1px solid #e1e8e2; border-radius: 6px; background: #fbfdfb; }.schema-preview > .eyebrow { display: block; margin-bottom: 2px; }.schema-field { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid #edf1ed; color: #17211b; font: 12px Arial; }.schema-field small { flex: 0 0 auto; color: #77847c; font: 11px monospace; }

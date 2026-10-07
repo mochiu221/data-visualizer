@@ -7,7 +7,7 @@ import { of } from 'rxjs';
 
 type DatabaseType = 'mssql' | 'mongodb' | 'postgresql' | 'mysql';
 type ChartType = 'bar' | 'line' | 'donut' | 'table';
-interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; status: string; }
+interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; hasPassword: boolean; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface Visualization { id: string; title: string; source: string; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; }
@@ -110,7 +110,7 @@ export class AppComponent implements OnInit {
   editConnection(connection: Connection): void {
     this.connectionMenuId = '';
     this.editingConnectionId = connection.id;
-    this.newConnection = { name: connection.name, type: connection.type, host: connection.host, port: connection.port, database: connection.database, username: connection.username, password: this.maskedPassword, tls: connection.tls };
+    this.newConnection = { name: connection.name, type: connection.type, host: connection.host, port: connection.port, database: connection.database, username: connection.username, password: connection.hasPassword ? this.maskedPassword : '', tls: connection.tls };
     this.testedConnectionFingerprint = '';
     this.connectionTestMessage = '';
     this.connectionTestFailed = false;

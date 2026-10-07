@@ -10,7 +10,7 @@ export function registerConnectionRoutes(app: FastifyInstance): void {
     app.post('/api/connections', async (request, reply) => {
         const parsed = connectionInput.safeParse(request.body);
         if (!parsed.success) return reply.code(400).send({ message: 'Invalid connection details', issues: parsed.error.flatten() });
-        const connection: Connection = { ...parsed.data, id: crypto.randomUUID(), password: encrypt(parsed.data.password), createdAt: new Date().toISOString() };
+        const connection: Connection = { ...parsed.data, id: crypto.randomUUID(), password: parsed.data.password ? encrypt(parsed.data.password) : '', createdAt: new Date().toISOString() };
         if (metadataDb) {
             await metadataDb.query('INSERT INTO saved_connections (id, name, type, host, port, database_name, username, encrypted_password, tls, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)', [connection.id, connection.name, connection.type, connection.host, connection.port, connection.database, connection.username, connection.password, connection.tls, connection.createdAt]);
         }
@@ -34,7 +34,7 @@ export function registerConnectionRoutes(app: FastifyInstance): void {
     app.post('/api/connections/test', async (request, reply) => {
         const parsed = connectionInput.safeParse(request.body);
         if (!parsed.success) return reply.code(400).send({ message: 'Complete the connection details before testing.', issues: parsed.error.flatten() });
-        const temporaryConnection: Connection = { ...parsed.data, id: 'connection-test', password: encrypt(parsed.data.password), createdAt: new Date().toISOString() };
+        const temporaryConnection: Connection = { ...parsed.data, id: 'connection-test', password: parsed.data.password ? encrypt(parsed.data.password) : '', createdAt: new Date().toISOString() };
         try {
             await verifyConnection(temporaryConnection);
             return { ok: true, message: `Connected successfully to ${temporaryConnection.host}:${temporaryConnection.port}` };

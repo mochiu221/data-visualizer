@@ -1,17 +1,25 @@
 import { z } from 'zod';
 
-export const connectionInput = z.object({
+const connectionFields = z.object({
     name: z.string().min(1).max(80),
     type: z.enum(['mssql', 'mongodb', 'postgresql', 'mysql']),
     host: z.string().min(1).max(253),
     port: z.number().int().min(1).max(65535),
     database: z.string().min(1).max(120),
-    username: z.string().min(1).max(120),
-    password: z.string().min(1).max(300),
+    username: z.string().max(120),
+    password: z.string().max(300),
     tls: z.boolean().default(true)
 });
 
-export const connectionUpdate = connectionInput.extend({ password: z.string().max(300).optional() });
+function requireCredentialsForSql(value: { type: string; username?: string; password?: string }, context: z.RefinementCtx): void {
+    if (value.type !== 'mongodb' && !value.username) context.addIssue({ code: z.ZodIssueCode.custom, path: ['username'], message: 'Username is required for this database type.' });
+    if (value.type !== 'mongodb' && !value.password) context.addIssue({ code: z.ZodIssueCode.custom, path: ['password'], message: 'Password is required for this database type.' });
+}
+
+export const connectionInput = connectionFields.superRefine(requireCredentialsForSql);
+export const connectionUpdate = connectionFields.extend({ password: z.string().max(300).optional() }).superRefine((value, context) => {
+    if (value.type !== 'mongodb' && !value.username) context.addIssue({ code: z.ZodIssueCode.custom, path: ['username'], message: 'Username is required for this database type.' });
+});
 
 export const visualizationInput = z.object({
     title: z.string().min(1).max(120),

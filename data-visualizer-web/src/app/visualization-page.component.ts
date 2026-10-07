@@ -3,10 +3,10 @@ import { HttpClient } from '@angular/common/http';
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { CategoryScale, Chart, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip } from 'chart.js';
+import { BarController, BarElement, CategoryScale, Chart, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 
-Chart.register(CategoryScale, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip);
+Chart.register(BarController, BarElement, CategoryScale, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip);
 
 interface Visualization {
   id: string;
@@ -48,11 +48,19 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   private tableDragging = false;
   private lineCanvas?: ElementRef<HTMLCanvasElement>;
   private lineChart?: Chart<'line', (number | { x: string; y: number })[], string>;
+  private barCanvas?: ElementRef<HTMLCanvasElement>;
+  private barChart?: Chart<'bar', number[], string>;
 
   @ViewChild('lineCanvas')
   set lineCanvasElement(value: ElementRef<HTMLCanvasElement> | undefined) {
     this.lineCanvas = value;
     if (value) this.scheduleLineChartRender();
+  }
+
+  @ViewChild('barCanvas')
+  set barCanvasElement(value: ElementRef<HTMLCanvasElement> | undefined) {
+    this.barCanvas = value;
+    if (value) this.scheduleBarChartRender();
   }
 
   filterKey(control: Visualization['filterControls'][number]): string {
@@ -66,7 +74,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     });
   }
 
-  ngOnDestroy(): void { this.lineChart?.destroy(); }
+  ngOnDestroy(): void { this.lineChart?.destroy(); this.barChart?.destroy(); }
 
   loadVisualization(id: string | null): void {
     this.visualization = undefined;
@@ -74,7 +82,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!id) { this.error = 'Visualization not found.'; this.loading = false; return; }
     this.loading = true;
     this.http.get<Visualization>(`${this.apiUrl}/visualizations/${id}`).subscribe({
-      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.status === 404 ? 'Visualization not found.' : response.error?.message ?? 'Could not load the visualization.'; this.loading = false; }
     });
   }
@@ -84,7 +92,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     this.loading = true;
     this.error = '';
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
-      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not apply filters.'; this.loading = false; }
     });
   }
@@ -100,7 +108,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!this.visualization) return;
     this.loading = true;
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
-      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); },
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not load that page.'; this.loading = false; }
     });
   }
@@ -163,6 +171,43 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   private scheduleLineChartRender(): void {
     setTimeout(() => this.renderLineChart());
+  }
+
+  private scheduleBarChartRender(): void {
+    setTimeout(() => this.renderBarChart());
+  }
+
+  private renderBarChart(): void {
+    if (this.visualization?.type !== 'bar' || !this.barCanvas) {
+      this.barChart?.destroy();
+      this.barChart = undefined;
+      return;
+    }
+    this.barChart?.destroy();
+    const values = this.visualization.data.map((item) => Math.max(this.chartValue(item), 0));
+    const maximum = Math.max(0, ...values);
+    const precision = values.some((value) => !Number.isInteger(value)) ? 2 : 0;
+    const isHorizontal = values.length > 12;
+    this.barChart = new Chart<'bar', number[], string>(this.barCanvas.nativeElement, {
+      type: 'bar',
+      data: {
+        labels: this.visualization.data.map((item) => this.chartLabel(item)),
+        datasets: [{ label: this.visualization.chart?.yAxis.label ?? 'Value', data: values, backgroundColor: values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e'), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: values.length > 12 ? 42 : 78 }]
+      },
+      options: {
+        indexAxis: isHorizontal ? 'y' : 'x',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { displayColors: false, padding: 10 } },
+        scales: isHorizontal ? {
+          x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
+          y: { grid: { display: false }, border: { display: false }, ticks: { color: '#718078', autoSkip: false, padding: 8 } }
+        } : {
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: '#718078', autoSkip: false, maxRotation: 60, minRotation: 45, padding: 8 } },
+          y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
+        }
+      }
+    });
   }
 
   private renderLineChart(): void {

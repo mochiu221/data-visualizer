@@ -17,5 +17,5 @@ export function decrypt(value: string): string {
 }
 
 export function publicConnection(connection: Connection) {
-    return { id: connection.id, name: connection.name, type: connection.type, host: connection.host, port: connection.port, database: connection.database, username: connection.username, tls: connection.tls, createdAt: connection.createdAt, status: 'ready' };
+    return { id: connection.id, name: connection.name, type: connection.type, host: connection.host, port: connection.port, database: connection.database, username: connection.username, tls: connection.tls, hasPassword: Boolean(connection.password), createdAt: connection.createdAt, status: 'ready' };
 }
