@@ -201,9 +201,9 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         plugins: { legend: { display: false }, tooltip: { displayColors: false, padding: 10 } },
         scales: isHorizontal ? {
           x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
-          y: { grid: { display: false }, border: { display: false }, ticks: { color: '#718078', autoSkip: false, padding: 8 } }
+          y: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, padding: 8 } }
         } : {
-          x: { grid: { display: false }, border: { display: false }, ticks: { color: '#718078', autoSkip: false, maxRotation: 60, minRotation: 45, padding: 8 } },
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, maxRotation: 60, minRotation: 45, padding: 8 } },
           y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
         }
       }
@@ -265,7 +265,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
             grid: { display: false },
             border: { display: false },
             time: { unit: this.visualization.chart?.xAxis.timeUnit ?? 'day' },
-            ticks: { color: '#718078', maxRotation: 0, autoSkip: true, padding: 8 }
+            ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', maxRotation: 0, autoSkip: true, padding: 8 }
           },
           y: {
             beginAtZero: true,
@@ -290,7 +290,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (typeof value !== 'string') return String(value);
     try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : value; } catch { return value.replace(/^"|"$/g, ''); }
   }
-  chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; return this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); }
+  chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; const label = this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); return label.trim() ? label : 'NULL'; }
   chartTimeValue(item: Record<string, string | number>): string { return this.chartLabel(item).replace(/Z$/, ''); }
   donutTotal(): number { return (this.visualization?.data ?? []).reduce((total, item) => total + Math.max(this.chartValue(item), 0), 0); }
   donutGradient(): string {

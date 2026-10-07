@@ -184,7 +184,8 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
             const aggregation = chart?.yAggregation ?? 'count';
             const measures = chartMeasures(chart);
             const groupCalculations = aggregation === 'sum' ? Object.fromEntries(measures.map((measure) => [measure.field, { $sum: `$${measure.field}` }])) : aggregation === 'average' ? Object.fromEntries(measures.map((measure) => [measure.field, { $avg: `$${measure.field}` }])) : aggregation === 'min' ? Object.fromEntries(measures.map((measure) => [measure.field, { $min: `$${measure.field}` }])) : aggregation === 'max' ? Object.fromEntries(measures.map((measure) => [measure.field, { $max: `$${measure.field}` }])) : { count: { $sum: 1 } };
-            return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, ...groupCalculations } })}])`;
+            const sortStage = plan.sort ? `, ${JSON.stringify({ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } })}` : '';
+            return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, ...groupCalculations } })}${sortStage}])`;
         }
         const sort = plan.sort ? `.sort(${JSON.stringify({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 })})` : '';
         const projection = plan.select.length ? `, ${JSON.stringify(Object.fromEntries(plan.select.map((selection) => [selectionField(selection), 1])))}` : '';
@@ -238,6 +239,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
                     { $group: { _id: groupId, ...groupCalculations } },
+                    ...(plan.sort ? [{ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } }] : []),
                     { $skip: (plan.page - 1) * plan.pageSize },
                     { $limit: plan.pageSize }
                 ]).toArray();
