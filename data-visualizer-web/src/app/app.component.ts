@@ -3,10 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, RouterOutlet } from '@angular/router';
+import { of } from 'rxjs';
 
 type DatabaseType = 'mssql' | 'mongodb' | 'postgresql' | 'mysql';
 type ChartType = 'bar' | 'line' | 'donut' | 'table';
-interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; status: string; }
+interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface Visualization { id: string; title: string; source: string; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; }
@@ -28,6 +29,7 @@ export class AppComponent implements OnInit {
   private readonly router = inject(Router);
   readonly apiUrl = 'http://localhost:3000/api';
   readonly databaseTypes: DatabaseType[] = ['mssql', 'mongodb', 'postgresql', 'mysql'];
+  readonly maskedPassword = '********';
   connections: Connection[] = [];
   visualizations: Visualization[] = [];
   activeView = 'overview';
@@ -45,6 +47,9 @@ export class AppComponent implements OnInit {
   pendingVisualization?: VisualizationPreview;
   pendingDefinition?: VisualizationDefinitionPreview;
   visualizationToDelete?: Visualization;
+  connectionToDelete?: Connection;
+  connectionMenuId = '';
+  editingConnectionId = '';
   schemaColumns: Array<{ name: string; type: string }> = [];
   tables: TableSource[] = [];
   isLoadingTables = false;
@@ -83,17 +88,51 @@ export class AppComponent implements OnInit {
     this.testedConnectionFingerprint = '';
     this.connectionTestMessage = '';
     this.connectionTestFailed = false;
-    this.http.post<{ message: string }>(`${this.apiUrl}/connections/test`, this.newConnection).subscribe({
+    const retainingPassword = this.editingConnectionId && (this.newConnection.password === this.maskedPassword || !this.newConnection.password);
+    const connectionPayload = { ...this.newConnection, password: retainingPassword ? '' : this.newConnection.password };
+    const connectionTest = retainingPassword ? of({ message: 'Existing password retained.' }) : this.http.post<{ message: string }>(`${this.apiUrl}/connections/test`, connectionPayload);
+    connectionTest.subscribe({
       next: (result) => {
         this.isTestingNewConnection = false;
-        this.testedConnectionFingerprint = JSON.stringify(this.newConnection);
+        this.testedConnectionFingerprint = JSON.stringify(connectionPayload);
         this.connectionTestMessage = result.message;
-        this.http.post<Connection>(`${this.apiUrl}/connections`, this.newConnection).subscribe({
-          next: (connection) => { this.connections = [connection, ...this.connections]; this.query.connectionId = connection.id; this.selectConnection(); this.showConnectionForm = false; this.isSaving = false; this.notice = 'Connection saved securely.'; },
+        const request = this.editingConnectionId ? this.http.put<Connection>(`${this.apiUrl}/connections/${this.editingConnectionId}`, connectionPayload) : this.http.post<Connection>(`${this.apiUrl}/connections`, connectionPayload);
+        request.subscribe({
+          next: (connection) => { this.connections = this.editingConnectionId ? this.connections.map((item) => item.id === connection.id ? connection : item) : [connection, ...this.connections]; this.query.connectionId = connection.id; this.selectConnection(); this.closeConnectionForm(); this.isSaving = false; this.notice = this.editingConnectionId ? 'Connection updated securely.' : 'Connection saved securely.'; },
           error: () => { this.isSaving = false; this.notice = 'Could not save that connection.'; }
         });
       },
       error: (response) => { this.isSaving = false; this.isTestingNewConnection = false; this.connectionTestFailed = true; this.connectionTestMessage = response.error?.message ?? 'Connection test failed.'; this.notice = this.connectionTestMessage; }
+    });
+  }
+  editConnection(connection: Connection): void {
+    this.connectionMenuId = '';
+    this.editingConnectionId = connection.id;
+    this.newConnection = { name: connection.name, type: connection.type, host: connection.host, port: connection.port, database: connection.database, username: connection.username, password: this.maskedPassword, tls: connection.tls };
+    this.testedConnectionFingerprint = '';
+    this.connectionTestMessage = '';
+    this.connectionTestFailed = false;
+    this.showConnectionForm = true;
+  }
+  clearPasswordPlaceholder(): void { if (this.newConnection.password === this.maskedPassword) this.newConnection.password = ''; }
+  restorePasswordPlaceholder(): void { if (this.editingConnectionId && !this.newConnection.password) this.newConnection.password = this.maskedPassword; }
+  openNewConnectionForm(): void {
+    this.editingConnectionId = '';
+    this.newConnection = { name: '', type: 'mssql', host: '', port: 1433, database: '', username: '', password: '', tls: false };
+    this.testedConnectionFingerprint = '';
+    this.connectionTestMessage = '';
+    this.connectionTestFailed = false;
+    this.showConnectionForm = true;
+  }
+  closeConnectionForm(): void { this.showConnectionForm = false; this.editingConnectionId = ''; }
+  requestDeleteConnection(connection: Connection): void { this.connectionMenuId = ''; this.connectionToDelete = connection; }
+  cancelDeleteConnection(): void { this.connectionToDelete = undefined; }
+  deleteConnection(): void {
+    const connection = this.connectionToDelete;
+    if (!connection) return;
+    this.http.delete(`${this.apiUrl}/connections/${connection.id}`).subscribe({
+      next: () => { this.connections = this.connections.filter((item) => item.id !== connection.id); if (this.query.connectionId === connection.id) { this.query.connectionId = ''; this.query.source = ''; this.tables = []; this.schemaColumns = []; } this.connectionToDelete = undefined; this.notice = 'Connection deleted.'; },
+      error: (response) => { this.notice = response.error?.message ?? 'Could not delete the connection.'; }
     });
   }
   generateVisualization(): void {

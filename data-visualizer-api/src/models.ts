@@ -11,6 +11,8 @@ export const connectionInput = z.object({
     tls: z.boolean().default(true)
 });
 
+export const connectionUpdate = connectionInput.extend({ password: z.string().max(300).optional() });
+
 export const visualizationInput = z.object({
     title: z.string().min(1).max(120),
     connectionId: z.string(),

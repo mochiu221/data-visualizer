@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { metadataDb } from '../config.js';
-import { connections, connectionInput, type Connection } from '../models.js';
+import { connections, connectionInput, connectionUpdate, type Connection } from '../models.js';
 import { encrypt, publicConnection } from '../security.js';
 import { discoverSchema, listTables, verifyConnection } from '../database.js';
 
@@ -16,6 +16,19 @@ export function registerConnectionRoutes(app: FastifyInstance): void {
         }
         connections.push(connection);
         return reply.code(201).send(publicConnection(connection));
+    });
+
+    app.put('/api/connections/:id', async (request, reply) => {
+        const index = connections.findIndex((item) => item.id === (request.params as { id: string }).id);
+        if (index < 0) return reply.code(404).send({ message: 'Connection not found' });
+        const parsed = connectionUpdate.safeParse(request.body);
+        if (!parsed.success) return reply.code(400).send({ message: 'Invalid connection details', issues: parsed.error.flatten() });
+        const connection: Connection = { ...parsed.data, id: connections[index].id, password: parsed.data.password ? encrypt(parsed.data.password) : connections[index].password, createdAt: connections[index].createdAt };
+        if (metadataDb) {
+            await metadataDb.query('UPDATE saved_connections SET name = $1, type = $2, host = $3, port = $4, database_name = $5, username = $6, encrypted_password = $7, tls = $8 WHERE id = $9', [connection.name, connection.type, connection.host, connection.port, connection.database, connection.username, connection.password, connection.tls, connection.id]);
+        }
+        connections[index] = connection;
+        return publicConnection(connection);
     });
     
     app.post('/api/connections/test', async (request, reply) => {
