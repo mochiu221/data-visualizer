@@ -3,10 +3,34 @@ import { HttpClient } from '@angular/common/http';
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { BarController, BarElement, CategoryScale, Chart, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip } from 'chart.js';
+import { ArcElement, BarController, BarElement, CategoryScale, Chart, DoughnutController, Filler, Legend, LineController, LineElement, LinearScale, Plugin, PointElement, TimeScale, Tooltip } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 
-Chart.register(BarController, BarElement, CategoryScale, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip);
+Chart.register(ArcElement, BarController, BarElement, CategoryScale, DoughnutController, Filler, Legend, LineController, LineElement, LinearScale, PointElement, TimeScale, Tooltip);
+
+const donutLabelsPlugin: Plugin<'doughnut'> = {
+  id: 'donutLabels',
+  afterDatasetsDraw(chart) {
+    const values = (chart.data.datasets[0]?.data ?? []).map((value) => Number(value));
+    const total = values.reduce((sum, value) => sum + Math.max(value, 0), 0);
+    if (!total) return;
+    const context = chart.ctx;
+    const metadata = chart.getDatasetMeta(0);
+    context.save();
+    context.fillStyle = '#ffffff';
+    context.font = '600 11px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    metadata.data.forEach((arc, index) => {
+      const value = Math.max(values[index] ?? 0, 0);
+      if (!value) return;
+      const position = arc.tooltipPosition(false);
+      if (position.x == null || position.y == null) return;
+      context.fillText(`${Math.round(value / total * 100)}%`, position.x, position.y);
+    });
+    context.restore();
+  }
+};
 
 interface Visualization {
   id: string;
@@ -50,6 +74,8 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   private lineChart?: Chart<'line', (number | { x: string; y: number })[], string>;
   private barCanvas?: ElementRef<HTMLCanvasElement>;
   private barChart?: Chart<'bar', number[], string>;
+  private donutCanvas?: ElementRef<HTMLCanvasElement>;
+  private donutChart?: Chart<'doughnut', number[], string>;
 
   @ViewChild('lineCanvas')
   set lineCanvasElement(value: ElementRef<HTMLCanvasElement> | undefined) {
@@ -63,6 +89,12 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (value) this.scheduleBarChartRender();
   }
 
+  @ViewChild('donutCanvas')
+  set donutCanvasElement(value: ElementRef<HTMLCanvasElement> | undefined) {
+    this.donutCanvas = value;
+    if (value) this.scheduleDonutChartRender();
+  }
+
   filterKey(control: Visualization['filterControls'][number]): string {
     return `${control.field}::${control.operator}`;
   }
@@ -74,7 +106,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     });
   }
 
-  ngOnDestroy(): void { this.lineChart?.destroy(); this.barChart?.destroy(); }
+  ngOnDestroy(): void { this.lineChart?.destroy(); this.barChart?.destroy(); this.donutChart?.destroy(); }
 
   loadVisualization(id: string | null): void {
     this.visualization = undefined;
@@ -82,7 +114,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!id) { this.error = 'Visualization not found.'; this.loading = false; return; }
     this.loading = true;
     this.http.get<Visualization>(`${this.apiUrl}/visualizations/${id}`).subscribe({
-      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.status === 404 ? 'Visualization not found.' : response.error?.message ?? 'Could not load the visualization.'; this.loading = false; }
     });
   }
@@ -92,7 +124,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     this.loading = true;
     this.error = '';
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
-      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not apply filters.'; this.loading = false; }
     });
   }
@@ -108,7 +140,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!this.visualization) return;
     this.loading = true;
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
-      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); },
+      next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not load that page.'; this.loading = false; }
     });
   }
@@ -175,6 +207,37 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   private scheduleBarChartRender(): void {
     setTimeout(() => this.renderBarChart());
+  }
+
+  private scheduleDonutChartRender(): void {
+    setTimeout(() => this.renderDonutChart());
+  }
+
+  private renderDonutChart(): void {
+    if (this.visualization?.type !== 'donut' || !this.donutCanvas) {
+      this.donutChart?.destroy();
+      this.donutChart = undefined;
+      return;
+    }
+    this.donutChart?.destroy();
+    const colors = ['#2b805d', '#d77b43', '#73b58e', '#c65d4c', '#4e7891', '#b38b4a'];
+    this.donutChart = new Chart<'doughnut', number[], string>(this.donutCanvas.nativeElement, {
+      type: 'doughnut',
+      data: {
+        labels: this.visualization.data.map((item) => this.chartLabel(item)),
+        datasets: [{ data: this.visualization.data.map((item) => Math.max(this.chartValue(item), 0)), backgroundColor: this.visualization.data.map((_item, index) => colors[index % colors.length]), borderColor: '#ffffff', borderWidth: 3, hoverOffset: 6 }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '62%',
+        plugins: {
+          legend: { position: 'right', labels: { color: '#718078', padding: 14, usePointStyle: true } },
+          tooltip: { displayColors: false, padding: 10 }
+        }
+      },
+      plugins: [donutLabelsPlugin]
+    });
   }
 
   private renderBarChart(): void {
@@ -292,21 +355,6 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   }
   chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; const label = this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); return label.trim() ? label : 'NULL'; }
   chartTimeValue(item: Record<string, string | number>): string { return this.chartLabel(item).replace(/Z$/, ''); }
-  donutTotal(): number { return (this.visualization?.data ?? []).reduce((total, item) => total + Math.max(this.chartValue(item), 0), 0); }
-  donutGradient(): string {
-    const colors = ['#2b805d', '#d77b43', '#73b58e', '#c65d4c', '#4e7891', '#b38b4a'];
-    const total = this.donutTotal();
-    if (!total) return 'conic-gradient(#dce9df 0 100%)';
-    let offset = 0;
-    const segments = (this.visualization?.data ?? []).map((item, index) => {
-      const next = offset + (Math.max(this.chartValue(item), 0) / total) * 100;
-      const segment = `${colors[index % colors.length]} ${offset}% ${next}%`;
-      offset = next;
-      return segment;
-    });
-    return `conic-gradient(${segments.join(', ')})`;
-  }
-  donutPercent(item: Record<string, string | number>): number { const total = this.donutTotal(); return total ? Math.round((Math.max(this.chartValue(item), 0) / total) * 100) : 0; }
   keys(): string[] { return this.visualization?.data[0] ? Object.keys(this.visualization.data[0]) : []; }
   sortSummary(): string { const sort = this.visualization?.queryPlan?.sort; return sort ? `${sort.field} ${sort.direction}` : 'Default order'; }
   queryParameterName(index: number): string { return `p${index}`; }
