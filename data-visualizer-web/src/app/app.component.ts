@@ -32,7 +32,7 @@ export class AppComponent implements OnInit {
   readonly maskedPassword = '********';
   connections: Connection[] = [];
   visualizations: Visualization[] = [];
-  activeView = 'overview';
+  private _activeView = 'overview';
   showConnectionForm = false;
   isSaving = false;
   isTestingNewConnection = false;
@@ -58,6 +58,8 @@ export class AppComponent implements OnInit {
   newConnection = { name: '', type: 'mssql' as DatabaseType, host: '', port: 1433, database: '', username: '', password: '', tls: false };
   readonly todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date()).toUpperCase();
   get isDetailPage(): boolean { return this.router.url.startsWith('/visualizations/'); }
+  get activeView(): string { return this._activeView; }
+  set activeView(value: string) { this._activeView = value; this.notice = ''; }
   get connectionTestPassed(): boolean { return this.testedConnectionFingerprint === JSON.stringify(this.newConnection); }
 
   ngOnInit(): void { this.loadConnections(); this.loadVisualizations(); }
@@ -98,7 +100,7 @@ export class AppComponent implements OnInit {
         this.connectionTestMessage = result.message;
         const request = this.editingConnectionId ? this.http.put<Connection>(`${this.apiUrl}/connections/${this.editingConnectionId}`, connectionPayload) : this.http.post<Connection>(`${this.apiUrl}/connections`, connectionPayload);
         request.subscribe({
-          next: (connection) => { this.connections = this.editingConnectionId ? this.connections.map((item) => item.id === connection.id ? connection : item) : [connection, ...this.connections]; this.query.connectionId = connection.id; this.selectConnection(); this.closeConnectionForm(); this.isSaving = false; this.notice = this.editingConnectionId ? 'Connection updated securely.' : 'Connection saved securely.'; },
+          next: (connection) => { this.connections = this.editingConnectionId ? this.connections.map((item) => item.id === connection.id ? connection : item) : [connection, ...this.connections]; this.loadConnections(); this.query.connectionId = connection.id; this.selectConnection(); this.closeConnectionForm(); this.isSaving = false; this.notice = this.editingConnectionId ? 'Connection updated securely.' : 'Connection saved securely.'; },
           error: () => { this.isSaving = false; this.notice = 'Could not save that connection.'; }
         });
       },

@@ -5,7 +5,7 @@ import { encrypt, publicConnection } from '../security.js';
 import { discoverSchema, listTables, verifyConnection } from '../database.js';
 
 export function registerConnectionRoutes(app: FastifyInstance): void {
-    app.get('/api/connections', async () => connections.map(publicConnection));
+    app.get('/api/connections', async () => connections.slice().sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)).map(publicConnection));
     
     app.post('/api/connections', async (request, reply) => {
         const parsed = connectionInput.safeParse(request.body);
