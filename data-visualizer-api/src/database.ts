@@ -181,8 +181,9 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
 
 function selectionField(selection: SelectField): string { return selection.field; }
 
-function chartMeasures(chart: ChartDefinition | undefined): ChartDefinition['yAxis'][] {
-    return chart?.yAxes?.length ? chart.yAxes : chart ? [chart.yAxis] : [];
+function groupedMeasureFields(plan: QueryPlan): string[] {
+    const groupFields = new Set(plan.groupBy);
+    return [...new Set(plan.select.map((selection) => selectionField(selection)).filter((field) => !groupFields.has(field)))];
 }
 
 function defaultGroupedSort(groupBy: string[], dialect: 'mssql' | 'postgresql' | 'mysql'): string {
@@ -196,10 +197,10 @@ function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefine
     const groupedFields = plan.groupBy.map((field) => quoteField(field, dialect));
     if (!groupedFields.length) return { select: plan.select.length ? plan.select.map((selection) => quoteField(selectionField(selection), dialect)).join(', ') : '*', groupBy: '' };
     const aggregation = chart?.yAggregation ?? 'count';
-    const measures = chartMeasures(chart);
-    if (aggregation === 'count' || aggregation === 'none' || !measures.length) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
+    const measureFields = groupedMeasureFields(plan);
+    if (aggregation === 'count' || aggregation === 'none' || !measureFields.length) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
     const functionName = { sum: 'SUM', average: 'AVG', min: 'MIN', max: 'MAX' }[aggregation];
-    const projections = measures.map((measure) => { const field = quoteField(measure.field, dialect); return `${functionName}(${field}) AS ${field}`; });
+    const projections = measureFields.map((fieldName) => { const field = quoteField(fieldName, dialect); return `${functionName}(${field}) AS ${field}`; });
     return { select: `${groupedFields.join(', ')}, ${projections.join(', ')}`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
 }
 
@@ -225,8 +226,8 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
                 return [field, `$${field}`];
             }));
             const aggregation = chart?.yAggregation ?? 'count';
-            const measures = chartMeasures(chart);
-            const groupCalculations = aggregation === 'sum' ? Object.fromEntries(measures.map((measure) => [measure.field, { $sum: `$${measure.field}` }])) : aggregation === 'average' ? Object.fromEntries(measures.map((measure) => [measure.field, { $avg: `$${measure.field}` }])) : aggregation === 'min' ? Object.fromEntries(measures.map((measure) => [measure.field, { $min: `$${measure.field}` }])) : aggregation === 'max' ? Object.fromEntries(measures.map((measure) => [measure.field, { $max: `$${measure.field}` }])) : { count: { $sum: 1 } };
+            const measureFields = groupedMeasureFields(plan);
+            const groupCalculations = aggregation === 'sum' ? Object.fromEntries(measureFields.map((field) => [field, { $sum: `$${field}` }])) : aggregation === 'average' ? Object.fromEntries(measureFields.map((field) => [field, { $avg: `$${field}` }])) : aggregation === 'min' ? Object.fromEntries(measureFields.map((field) => [field, { $min: `$${field}` }])) : aggregation === 'max' ? Object.fromEntries(measureFields.map((field) => [field, { $max: `$${field}` }])) : { count: { $sum: 1 } };
             const sortStage = plan.sort
                 ? `, ${JSON.stringify({ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } })}`
                 : `, ${JSON.stringify({ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.${plan.groupBy[0]}`, null] }, 1, 0] } } })}, ${JSON.stringify({ $sort: { __categoryNullRank: 1, [`_id.${plan.groupBy[0]}`]: 1 } })}`;
@@ -279,8 +280,8 @@ export async function queryPreview(connection: Connection, source: string, plan:
                     if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
                     return [field, `$${field}`];
                 }));
-                const measures = chartMeasures(chart);
-                const groupCalculations = chart?.yAggregation === 'sum' ? Object.fromEntries(measures.map((measure) => [measure.field, { $sum: `$${measure.field}` }])) : chart?.yAggregation === 'average' ? Object.fromEntries(measures.map((measure) => [measure.field, { $avg: `$${measure.field}` }])) : chart?.yAggregation === 'min' ? Object.fromEntries(measures.map((measure) => [measure.field, { $min: `$${measure.field}` }])) : chart?.yAggregation === 'max' ? Object.fromEntries(measures.map((measure) => [measure.field, { $max: `$${measure.field}` }])) : { count: { $sum: 1 } };
+                const measureFields = groupedMeasureFields(plan);
+                const groupCalculations = chart?.yAggregation === 'sum' ? Object.fromEntries(measureFields.map((field) => [field, { $sum: `$${field}` }])) : chart?.yAggregation === 'average' ? Object.fromEntries(measureFields.map((field) => [field, { $avg: `$${field}` }])) : chart?.yAggregation === 'min' ? Object.fromEntries(measureFields.map((field) => [field, { $min: `$${field}` }])) : chart?.yAggregation === 'max' ? Object.fromEntries(measureFields.map((field) => [field, { $max: `$${field}` }])) : { count: { $sum: 1 } };
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
                     { $group: { _id: groupId, ...groupCalculations } },

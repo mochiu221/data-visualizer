@@ -163,7 +163,7 @@ export class AppComponent implements OnInit {
     if (!this.pendingDraftId) return;
     this.isConfirmingDraft = true;
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/confirm`, { draftId: this.pendingDraftId }).subscribe({
-      next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.isConfirmingDraft = false; this.activeView = 'overview'; this.notice = 'Visualization saved.'; },
+      next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.isConfirmingDraft = false; this.notice = 'Visualization saved.'; void this.router.navigate(['/visualizations', visualization.id]); },
       error: (response) => { this.isConfirmingDraft = false; this.notice = response.error?.message ?? 'Could not save the visualization.'; }
     });
   }

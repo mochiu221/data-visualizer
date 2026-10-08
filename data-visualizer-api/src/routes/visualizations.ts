@@ -8,7 +8,7 @@ import { buildPreviewParameters, buildPreviewQuery, countPreview, discoverSchema
 
 export function registerVisualizationRoutes(app: FastifyInstance): void {
     const drafts = new Map<string, Visualization>();
-    const normalizedQueryPlan = (visualization: Visualization): Visualization['queryPlan'] => visualization.type === 'table' ? { ...visualization.queryPlan, pageSize: 20 } : visualization.queryPlan;
+    const normalizedQueryPlan = (visualization: Visualization): Visualization['queryPlan'] => visualization.type === 'table' ? { ...visualization.queryPlan, pageSize: 20 } : visualization.type === 'bar' ? { ...visualization.queryPlan, pageSize: 1000 } : visualization.queryPlan;
     const categoryOptions = async (visualization: Visualization, connection: Connection): Promise<Record<string, Array<string | number | boolean>>> => {
         const options: Record<string, Array<string | number | boolean>> = {};
         for (const control of visualization.filterControls) {
@@ -21,7 +21,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
     };
     const persistVisualization = async (visualization: Visualization): Promise<void> => {
         if (metadataDb) {
-            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
+            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, select_mode, default_selects, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), visualization.selectMode, JSON.stringify(visualization.defaultSelects), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
         }
         visualizations.unshift(visualization);
     };
@@ -51,7 +51,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const connection = connections.find((item) => item.id === visualization.connectionId);
             if (!connection) return reply.code(404).send({ message: 'The visualization connection no longer exists.' });
             const body = request.body as { filters?: unknown; page?: unknown } | undefined;
-            const plan = visualization.type === 'table' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 20 } : applyFilterValues(visualization, body?.filters ?? {});
+            const plan = visualization.type === 'table' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 20 } : visualization.type === 'bar' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 1000 } : applyFilterValues(visualization, body?.filters ?? {});
             if (typeof body?.page === 'number' && Number.isInteger(body.page) && body.page >= 1) plan.page = body.page;
             const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
             const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan) : undefined;
@@ -118,6 +118,15 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         if (duplicateControls.length) {
             return reply.code(502).send({ message: `The AI returned duplicate filter controls for: ${duplicateControls[0]}` });
         }
+        const selectableFields = new Set(definition.queryPlan.select.map((selection) => selection.field));
+        const invalidDefaultSelect = definition.defaultSelects.find((field) => !selectableFields.has(field));
+        if (invalidDefaultSelect) {
+            return reply.code(502).send({ message: `The AI returned a default display field that is not in queryPlan.select: ${invalidDefaultSelect}` });
+        }
+        const normalizedDefaults = [...new Set(definition.defaultSelects)].filter((field) => selectableFields.has(field));
+        const selectMode = definition.selectMode === 'multiple' && selectableFields.size > 1 ? 'multiple' : 'single';
+        const defaultSelects = selectableFields.size === 0 ? [] : selectMode === 'single' ? [normalizedDefaults[0] ?? definition.queryPlan.select[0].field] : (normalizedDefaults.length ? normalizedDefaults : definition.queryPlan.select.map((selection) => selection.field));
+        definition = { ...definition, selectMode, defaultSelects };
         try {
             const categoryControls = definition.filterControls.filter((control) => control.category);
             const categoryValidityEntries = await Promise.all(categoryControls.map(async (control) => [control.field, (await listDistinctValues(connection, parsed.data.source, control.field)).length < 100] as const));
@@ -128,9 +137,9 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             return reply.code(502).send({ message });
         }
         const now = new Date().toISOString();
-        const queryPlan = definition.type === 'table' ? { ...definition.queryPlan, pageSize: 20 } : definition.queryPlan;
+        const queryPlan = definition.type === 'table' ? { ...definition.queryPlan, pageSize: 20 } : definition.type === 'bar' ? { ...definition.queryPlan, pageSize: 1000 } : definition.queryPlan;
         definition = { ...definition, queryPlan };
-        const visualization: Visualization = { ...parsed.data, type: definition.type, title: definition.title, id: crypto.randomUUID(), createdAt: now, updatedAt: now, schema, queryPlan, filterControls: definition.filterControls, chart: definition.chart };
+        const visualization: Visualization = { ...parsed.data, type: definition.type, title: definition.title, id: crypto.randomUUID(), createdAt: now, updatedAt: now, schema, queryPlan, filterControls: definition.filterControls, selectMode: definition.selectMode, defaultSelects: definition.defaultSelects, chart: definition.chart };
         const draftId = crypto.randomUUID();
         drafts.set(draftId, visualization);
         return reply.send({

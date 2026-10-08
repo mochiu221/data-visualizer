@@ -33,4 +33,16 @@
 @media (max-width: 650px) { .detail-page { padding: 28px 20px 56px; }.back-link { margin-bottom: 34px; }.detail-head { align-items: start; flex-direction: column; gap: 18px; }.detail-head h1 { font-size: 38px; }.detail-head .refresh { align-self: stretch; }.query-card { padding: 17px; }.query-text { font-size: 16px; }.filters { padding: 17px; gap: 18px; }.filter-heading { align-items: start; flex-direction: column; gap: 10px; }.filter-count { align-self: flex-start; }.filter-grid { grid-template-columns: 1fr; margin-top: 15px; }.filter-actions { width: 100%; }.filter-actions button { flex: 1; }.visual-frame { min-height: 320px; padding: 35px 16px 24px; overflow-x: auto; }.bars { min-width: 430px; height: 245px; } }
 .filter-heading-actions .icon-refresh { display: none; }
 .visual-frame { position: relative; }
-.plot-refresh { position: absolute; right: 12px; top: 10px; z-index: 2; }
+.plot-refresh { position: absolute; right: 8px; top: 6px; z-index: 2; }
+.plot-selector { align-items: center; background: #f5faf6; border: 1px solid #dce9df; border-radius: 10px; display: inline-flex; flex-wrap: wrap; gap: 9px; margin: -8px 0 16px; padding: 8px 10px 8px 11px; position: relative; z-index: 2; }
+.plot-selector-label { align-self: center; color: #6b7b70; font: 700 10px Arial, sans-serif; letter-spacing: .12em; }
+.plot-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.plot-option { background: #ffffff; border: 1px solid #c8ddcd; border-radius: 999px; color: #557064; cursor: pointer; font: 600 12px Arial, sans-serif; min-height: 30px; padding: 6px 11px; transition: background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease; }
+.plot-option:hover { border-color: #73b58e; color: #2b805d; }
+.plot-option.selected { background: #2b805d; border-color: #2b805d; color: #ffffff; box-shadow: 0 3px 8px rgba(43, 128, 93, .18); }
+.plot-option:focus-visible { outline: 2px solid #73b58e; outline-offset: 2px; }
+.plot-clear { background: transparent; border: 1px solid #c8ddcd; border-radius: 999px; color: #6b7b70; cursor: pointer; font: 700 11px Arial, sans-serif; min-height: 30px; padding: 6px 11px; }
+.plot-clear:hover { border-color: #c65d4c; color: #a34637; }
+.plot-clear:focus-visible { outline: 2px solid #c65d4c; outline-offset: 2px; }
+.sr-only { height: 1px; margin: -1px; overflow: hidden; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); }
+@media (max-width: 650px) { .plot-selector { align-items: flex-start; flex-direction: column; margin-top: -4px; max-width: calc(100% - 42px); }.plot-selector-label { align-self: flex-start; }.plot-options { width: 100%; }.plot-option { flex: 1 1 auto; } }

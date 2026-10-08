@@ -44,10 +44,12 @@ interface Visualization {
   type: 'bar' | 'line' | 'donut' | 'table';
   data: Array<Record<string, string | number>>;
   filterOptions?: Record<string, Array<string | number | boolean>>;
+  selectMode?: 'single' | 'multiple';
+  defaultSelects?: string[];
   schema?: Array<{ name: string; type: string }>;
   chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAxes?: Array<{ field: string; label: string; scale?: 'category' | 'time' }>; yAggregation: string };
   filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to'; category?: boolean }>;
-  queryPlan?: { page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
+  queryPlan?: { select: Array<{ field: string; label?: string }>; page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
 }
 type FilterValue = string | number | boolean | null;
 
@@ -65,6 +67,8 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   loading = true;
   error = '';
   filterValues: Record<string, FilterValue> = {};
+  selectedField = '';
+  selectedFields: string[] = [];
   tableCanScrollLeft = false;
   tableCanScrollRight = false;
   private tableDragStartX = 0;
@@ -115,7 +119,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!id) { this.error = 'Visualization not found.'; this.loading = false; return; }
     this.loading = true;
     this.http.get<Visualization>(`${this.apiUrl}/visualizations/${id}`).subscribe({
-      next: (item) => { this.visualization = item; this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.initializeDisplaySelection(item); this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.status === 404 ? 'Visualization not found.' : response.error?.message ?? 'Could not load the visualization.'; this.loading = false; }
     });
   }
@@ -133,6 +137,46 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   clearFilters(): void {
     for (const field of Object.keys(this.filterValues)) this.filterValues[field] = null;
     this.applyFilters();
+  }
+
+  selectableFields(): string[] {
+    const xAxisField = this.visualization?.chart?.xAxis.field;
+    return this.visualization?.queryPlan?.select.map((selection) => selection.field).filter((field) => field !== xAxisField) ?? [];
+  }
+
+  fieldLabel(field: string): string {
+    const selection = this.visualization?.queryPlan?.select.find((item) => item.field === field);
+    return selection?.label || field.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+  }
+
+  onDisplaySelectionChange(): void {
+    if (this.visualization?.selectMode === 'multiple') {
+      this.selectedFields = this.selectedFields.filter((field) => this.selectableFields().includes(field));
+      if (!this.selectedFields.length) this.selectedFields = [this.selectableFields()[0]];
+    } else {
+      this.selectedField = this.selectableFields().includes(this.selectedField) ? this.selectedField : this.selectableFields()[0] ?? '';
+      this.selectedFields = this.selectedField ? [this.selectedField] : [];
+    }
+    this.scheduleLineChartRender();
+    this.scheduleBarChartRender();
+    this.scheduleDonutChartRender();
+  }
+
+  toggleDisplayField(field: string): void {
+    if (!this.visualization) return;
+    if (this.visualization.selectMode === 'multiple') {
+      this.selectedFields = this.selectedFields.includes(field) ? this.selectedFields.filter((selected) => selected !== field) : [...this.selectedFields, field];
+    } else {
+      this.selectedField = field;
+    }
+    this.onDisplaySelectionChange();
+  }
+
+  clearDisplayFields(): void {
+    if (this.visualization?.selectMode !== 'multiple') return;
+    this.selectedFields = this.selectableFields().slice(0, 1);
+    this.selectedField = this.selectedFields[0] ?? '';
+    this.onDisplaySelectionChange();
   }
 
   goToTablePage(page: number): void {
@@ -214,6 +258,24 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     setTimeout(() => this.renderDonutChart());
   }
 
+  private initializeDisplaySelection(item: Visualization): void {
+    const fields = item.queryPlan?.select.map((selection) => selection.field).filter((field) => field !== item.chart?.xAxis.field) ?? [];
+    const defaults = (item.defaultSelects ?? []).filter((field) => fields.includes(field));
+    if (item.selectMode === 'multiple') {
+      this.selectedFields = defaults.length ? defaults : fields;
+      this.selectedField = this.selectedFields[0] ?? '';
+    } else {
+      this.selectedField = defaults[0] ?? fields[0] ?? '';
+      this.selectedFields = this.selectedField ? [this.selectedField] : [];
+    }
+  }
+
+  displayFields(): string[] {
+    const selected = this.visualization?.selectMode === 'multiple' ? this.selectedFields : this.selectedField ? [this.selectedField] : [];
+    const xAxisField = this.visualization?.chart?.xAxis.field;
+    return this.visualization?.type === 'table' && xAxisField ? [xAxisField, ...selected.filter((field) => field !== xAxisField)] : selected;
+  }
+
   private renderDonutChart(): void {
     if (this.visualization?.type !== 'donut' || !this.donutCanvas) {
       this.donutChart?.destroy();
@@ -248,7 +310,9 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
       return;
     }
     this.barChart?.destroy();
-    const values = this.visualization.data.map((item) => Math.max(this.chartValue(item), 0));
+    const selectedMeasures = this.displayFields().filter((field) => this.visualization?.chart?.yAxes?.some((axis) => axis.field === field) || field === this.visualization?.chart?.yAxis.field);
+    const measureField = selectedMeasures[0] ?? this.visualization.chart?.yAxis.field;
+    const values = this.visualization.data.map((item) => Math.max(this.chartValue(item, measureField), 0));
     const maximum = Math.max(0, ...values);
     const precision = values.some((value) => !Number.isInteger(value)) ? 2 : 0;
     const isHorizontal = values.length > 12;
@@ -283,7 +347,8 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     this.lineChart?.destroy();
     const chart = this.visualization.chart;
     const xAxisField = chart?.xAxis.field;
-    const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && typeof value === 'number').map(([field]) => field)))];
+    const selectedFields = new Set(this.displayFields());
+    const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && selectedFields.has(field) && typeof value === 'number').map(([field]) => field)))];
     const yAxisField = chart?.yAxis.field;
     const configuredFields = chart?.yAxes?.map((axis) => axis.field).filter((field) => numericFields.includes(field)) ?? [];
     const seriesFields = configuredFields.length
@@ -291,28 +356,32 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
       : yAxisField && numericFields.includes(yAxisField)
         ? [yAxisField, ...numericFields.filter((field) => field !== yAxisField)]
         : numericFields;
-    const colors = ['#1f7055', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#73b58e'];
+    const colors = ['#1f7055', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#73b58e', '#756bb1', '#a64d79', '#4f8b8b', '#9a6b38', '#3f6fa3', '#8c5948'];
+    const colorForField = (field: string): string => colors[Math.max(this.selectableFields().indexOf(field), 0) % colors.length];
     const isTimeScale = chart?.xAxis.scale === 'time';
     this.lineChart = new Chart<'line', (number | { x: string; y: number })[], string>(this.lineCanvas.nativeElement, {
       type: 'line',
       data: {
         labels: isTimeScale ? undefined : this.visualization.data.map((item) => this.chartLabel(item)),
-        datasets: seriesFields.map((field, index) => ({
-          label: chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === yAxisField ? chart?.yAxis.label ?? field : field),
-          data: isTimeScale
-            ? this.visualization!.data.map((item) => ({ x: this.chartTimeValue(item), y: Number(item[field] ?? 0) }))
-            : this.visualization!.data.map((item) => Number(item[field] ?? 0)),
-          borderColor: colors[index % colors.length],
-          backgroundColor: `${colors[index % colors.length]}18`,
-          borderWidth: 2,
-          pointRadius: 4,
-          pointHoverRadius: 5,
-          pointBackgroundColor: colors[index % colors.length],
-          pointBorderColor: '#ffffff',
-          pointBorderWidth: 2,
-          tension: .28,
-          fill: seriesFields.length === 1
-        }))
+        datasets: seriesFields.map((field) => {
+          const color = colorForField(field);
+          return {
+            label: chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === yAxisField ? chart?.yAxis.label ?? field : field),
+            data: isTimeScale
+              ? this.visualization!.data.map((item) => ({ x: this.chartTimeValue(item), y: Number(item[field] ?? 0) }))
+              : this.visualization!.data.map((item) => Number(item[field] ?? 0)),
+            borderColor: color,
+            backgroundColor: `${color}18`,
+            borderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 5,
+            pointBackgroundColor: color,
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 2,
+            tension: .28,
+            fill: seriesFields.length === 1
+          };
+        })
       },
       options: {
         responsive: true,
@@ -349,14 +418,14 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   trackFilterGroup(_index: number, group: { key: string }): string { return group.key; }
 
-  chartValue(item: Record<string, string | number>): number { const field = this.visualization?.chart?.yAxis.field; return Number(field ? item[field] ?? 0 : Object.values(item).find((value) => typeof value === 'number') ?? 0); }
+  chartValue(item: Record<string, string | number>, field = this.visualization?.chart?.yAxis.field): number { return Number(field ? item[field] ?? 0 : Object.values(item).find((value) => typeof value === 'number') ?? 0); }
   displayValue(value: string | number): string {
     if (typeof value !== 'string') return String(value);
     try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : value; } catch { return value.replace(/^"|"$/g, ''); }
   }
   chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; const label = this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); return label.trim() ? label : 'NULL'; }
   chartTimeValue(item: Record<string, string | number>): string { return this.chartLabel(item).replace(/Z$/, ''); }
-  keys(): string[] { return this.visualization?.data[0] ? Object.keys(this.visualization.data[0]) : []; }
+  keys(): string[] { const fields = this.displayFields(); return this.visualization?.data[0] ? fields.filter((field) => field in this.visualization!.data[0]) : []; }
   sortSummary(): string { const sort = this.visualization?.queryPlan?.sort; return sort ? `${sort.field} ${sort.direction}` : 'Default order'; }
   queryParameterName(index: number): string { return `p${index}`; }
   queryParameterValue(value: string | number | boolean): string { return typeof value === 'string' ? JSON.stringify(value) : String(value); }

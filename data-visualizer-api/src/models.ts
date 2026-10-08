@@ -56,17 +56,17 @@ export const chartAxisSchema = z.object({
 export const chartDefinitionSchema = z.object({
     xAxis: chartAxisSchema,
     yAxis: chartAxisSchema,
-    yAxes: z.array(chartAxisSchema).max(6).optional(),
+    yAxes: z.array(chartAxisSchema).max(50).optional(),
     yAggregation: z.enum(['none', 'count', 'sum', 'average', 'min', 'max']).default('none')
 });
 
 export type ChartDefinition = z.infer<typeof chartDefinitionSchema>;
 
-export type Visualization = z.infer<typeof visualizationInput> & { id: string; createdAt: string; updatedAt: string; schema: SchemaColumn[]; queryPlan: QueryPlan; filterControls: FilterControl[]; chart?: ChartDefinition };
+export type Visualization = z.infer<typeof visualizationInput> & { id: string; createdAt: string; updatedAt: string; schema: SchemaColumn[]; queryPlan: QueryPlan; filterControls: FilterControl[]; selectMode: SelectMode; defaultSelects: string[]; chart?: ChartDefinition };
 
 export const selectFieldSchema = z.object({
     field: z.string().min(1).max(80),
-    alias: z.string().min(1).max(80).optional()
+    label: z.string().min(1).max(80).optional()
 });
 export type SelectField = z.infer<typeof selectFieldSchema>;
 
@@ -82,10 +82,14 @@ export const queryPlanSchema = z.object({
 export const generatedDefinition = z.object({
     queryPlan: queryPlanSchema,
     filterControls: z.array(filterControlSchema).max(10).default([]),
+    selectMode: z.enum(['single', 'multiple']).default('single'),
+    defaultSelects: z.array(z.string().min(1).max(80)).max(50).default([]),
     title: z.string().min(1).max(120),
     type: z.enum(['bar', 'line', 'donut', 'table']),
     chart: chartDefinitionSchema
 });
+
+export type SelectMode = z.infer<typeof generatedDefinition>['selectMode'];
 
 export type QueryPlan = z.infer<typeof queryPlanSchema>;
 
