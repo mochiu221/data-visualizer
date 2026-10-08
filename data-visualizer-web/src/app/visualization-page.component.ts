@@ -317,6 +317,12 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     const seriesField = groupBy.length >= 2 && groupBy[0] === xAxisField ? groupBy[1] : undefined;
     const groupedLabels = seriesField ? [...new Set(this.visualization.data.map((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!]})))] : [];
     const seriesLabels = seriesField ? [...new Set(this.visualization.data.map((item) => this.chartLabel({ [xAxisField!]: item[seriesField] })))] : [];
+    const seriesColors = ['#73b58e', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#756bb1', '#a64d79', '#4f8b8b', '#9a6b38', '#3f6fa3', '#8c5948', '#2b805d'];
+    const colorForSeries = (series: string): string => {
+      let hash = 0;
+      for (const character of series) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+      return seriesColors[hash % seriesColors.length];
+    };
     const values = seriesField
       ? seriesLabels.flatMap((series) => groupedLabels.map((label) => {
         const row = this.visualization!.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series);
@@ -328,7 +334,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     const isHorizontal = (seriesField ? groupedLabels.length : values.length) > 12;
     const labels = seriesField ? groupedLabels : this.visualization.data.map((item) => this.chartLabel(item));
     const datasets = seriesField
-      ? seriesLabels.map((series, index) => ({ label: series, data: groupedLabels.map((label) => { const row = this.visualization!.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series); return Math.max(this.chartValue(row ?? {}, measureField), 0); }), backgroundColor: index % 3 === 2 ? '#d77b43' : index % 3 === 1 ? '#4e7891' : '#73b58e', borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: groupedLabels.length > 12 ? 42 : 78 }))
+      ? seriesLabels.map((series) => ({ label: series, data: groupedLabels.map((label) => { const row = this.visualization!.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series); return Math.max(this.chartValue(row ?? {}, measureField), 0); }), backgroundColor: colorForSeries(series), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: groupedLabels.length > 12 ? 42 : 78 }))
       : [{ label: this.visualization.chart?.yAxis.label ?? 'Value', data: values, backgroundColor: values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e'), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: values.length > 12 ? 42 : 78 }];
     this.barChart = new Chart<'bar', number[], string>(this.barCanvas.nativeElement, {
       type: 'bar',
