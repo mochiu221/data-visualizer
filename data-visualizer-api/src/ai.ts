@@ -60,6 +60,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '- Always provide chart.xAxis.field and chart.xAxis.label for the horizontal/category/time dimension.',
         '- Set chart.xAxis.scale to "time" when the x-axis field is a date, timestamp, month, week, or year time dimension; otherwise set it to "category".',
         '- When chart.xAxis.scale is "time", provide chart.xAxis.timeUnit using the most useful unit for the result, such as "day", "week", "month", or "year".',
+        '- When a time-series result uses chart.xAxis.timeUnit, include the x-axis field in queryPlan.groupBy so the database aggregates rows into that time unit.',
         '- Set chart.yAxis.scale to "category"; the y-axis is numeric and the frontend configures its linear Chart.js scale.',
         '- Always provide chart.yAxis.field and chart.yAxis.label for the numeric measure.',
         '- For yAggregation "count", set chart.yAxis.field to exactly "count" because the grouped query produces COUNT(*) AS count; do not use an ID or other source field as the y-axis field.',

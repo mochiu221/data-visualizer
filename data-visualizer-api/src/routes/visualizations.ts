@@ -36,7 +36,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             if (!connection) return reply.code(404).send({ message: 'The visualization connection no longer exists.' });
             const plan = normalizedQueryPlan(visualization);
             const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
-            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan) : undefined;
+            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart) : undefined;
             const filterOptions = await categoryOptions(visualization, connection);
             return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {
@@ -54,7 +54,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const plan = visualization.type === 'table' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 20 } : visualization.type === 'bar' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 1000 } : applyFilterValues(visualization, body?.filters ?? {});
             if (typeof body?.page === 'number' && Number.isInteger(body.page) && body.page >= 1) plan.page = body.page;
             const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
-            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan) : undefined;
+            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart) : undefined;
             const filterOptions = await categoryOptions(visualization, connection);
             return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {

@@ -186,6 +186,35 @@ function groupedMeasureFields(plan: QueryPlan): string[] {
     return [...new Set(plan.select.map((selection) => selectionField(selection)).filter((field) => !groupFields.has(field)))];
 }
 
+function timeUnitForField(field: string, chart: ChartDefinition | undefined): ChartDefinition['xAxis']['timeUnit'] | undefined {
+    return chart?.xAxis.scale === 'time' && chart.xAxis.field === field ? chart.xAxis.timeUnit : undefined;
+}
+
+function sqlGroupedField(field: string, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): string {
+    const quotedField = quoteField(field, dialect);
+    const unit = timeUnitForField(field, chart);
+    if (!unit) return quotedField;
+    if (dialect === 'postgresql') return `DATE_TRUNC('${unit}', ${quotedField})`;
+    if (dialect === 'mssql') {
+        const datePart = unit === 'millisecond' ? 'millisecond' : unit;
+        return `DATEADD(${datePart}, DATEDIFF(${datePart}, 0, ${quotedField}), 0)`;
+    }
+    if (unit === 'year') return `DATE_FORMAT(${quotedField}, '%Y-01-01')`;
+    if (unit === 'quarter') return `CONCAT(YEAR(${quotedField}), '-Q', QUARTER(${quotedField}))`;
+    if (unit === 'month') return `DATE_FORMAT(${quotedField}, '%Y-%m-01')`;
+    if (unit === 'week') return `YEARWEEK(${quotedField}, 1)`;
+    if (unit === 'day') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d')`;
+    if (unit === 'hour') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:00:00')`;
+    if (unit === 'minute') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:%i:00')`;
+    if (unit === 'second') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:%i:%s')`;
+    return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:%i:%s.%f')`;
+}
+
+function mongoGroupedField(field: string, chart: ChartDefinition | undefined): string | Record<string, unknown> {
+    const unit = timeUnitForField(field, chart);
+    return unit ? { $dateTrunc: { date: `$${field}`, unit } } : `$${field}`;
+}
+
 function defaultGroupedSort(groupBy: string[], dialect: 'mssql' | 'postgresql' | 'mysql'): string {
     const field = quoteField(groupBy[0], dialect);
     if (dialect === 'mssql') return ` ORDER BY CASE WHEN ${field} IS NULL THEN 1 ELSE 0 END, ${field} ASC`;
@@ -194,14 +223,16 @@ function defaultGroupedSort(groupBy: string[], dialect: 'mssql' | 'postgresql' |
 }
 
 function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): { select: string; groupBy: string } {
-    const groupedFields = plan.groupBy.map((field) => quoteField(field, dialect));
+    const groupedExpressions = plan.groupBy.map((field) => sqlGroupedField(field, chart, dialect));
+    const groupedFields = plan.groupBy.map((field, index) => groupedExpressions[index] === quoteField(field, dialect) ? groupedExpressions[index] : `${groupedExpressions[index]} AS ${quoteField(field, dialect)}`);
+    const groupByFields = groupedExpressions.join(', ');
     if (!groupedFields.length) return { select: plan.select.length ? plan.select.map((selection) => quoteField(selectionField(selection), dialect)).join(', ') : '*', groupBy: '' };
     const aggregation = chart?.yAggregation ?? 'count';
     const measureFields = groupedMeasureFields(plan);
-    if (aggregation === 'count' || aggregation === 'none' || !measureFields.length) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
+    if (aggregation === 'count' || aggregation === 'none' || !measureFields.length) return { select: `${groupedFields.join(', ')}, COUNT(*) AS count`, groupBy: ` GROUP BY ${groupByFields}` };
     const functionName = { sum: 'SUM', average: 'AVG', min: 'MIN', max: 'MAX' }[aggregation];
     const projections = measureFields.map((fieldName) => { const field = quoteField(fieldName, dialect); return `${functionName}(${field}) AS ${field}`; });
-    return { select: `${groupedFields.join(', ')}, ${projections.join(', ')}`, groupBy: ` GROUP BY ${groupedFields.join(', ')}` };
+    return { select: `${groupedFields.join(', ')}, ${projections.join(', ')}`, groupBy: ` GROUP BY ${groupByFields}` };
 }
 
 export function buildPreviewQuery(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): string {
@@ -223,7 +254,7 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
         if (plan.groupBy.length) {
             const group = Object.fromEntries(plan.groupBy.map((field) => {
                 if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                return [field, `$${field}`];
+                return [field, mongoGroupedField(field, chart)];
             }));
             const aggregation = chart?.yAggregation ?? 'count';
             const measureFields = groupedMeasureFields(plan);
@@ -278,7 +309,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
             if (plan.groupBy.length) {
                 const groupId = Object.fromEntries(plan.groupBy.map((field) => {
                     if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                    return [field, `$${field}`];
+                    return [field, mongoGroupedField(field, chart)];
                 }));
                 const measureFields = groupedMeasureFields(plan);
                 const groupCalculations = chart?.yAggregation === 'sum' ? Object.fromEntries(measureFields.map((field) => [field, { $sum: `$${field}` }])) : chart?.yAggregation === 'average' ? Object.fromEntries(measureFields.map((field) => [field, { $avg: `$${field}` }])) : chart?.yAggregation === 'min' ? Object.fromEntries(measureFields.map((field) => [field, { $min: `$${field}` }])) : chart?.yAggregation === 'max' ? Object.fromEntries(measureFields.map((field) => [field, { $max: `$${field}` }])) : { count: { $sum: 1 } };
@@ -355,7 +386,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
     }
 }
 
-export async function countPreview(connection: Connection, source: string, plan: QueryPlan): Promise<number> {
+export async function countPreview(connection: Connection, source: string, plan: QueryPlan, chart?: ChartDefinition): Promise<number> {
     const password = connection.password ? decrypt(connection.password) : '';
     if (connection.type === 'mongodb') {
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
@@ -372,7 +403,7 @@ export async function countPreview(connection: Connection, source: string, plan:
             if (!plan.groupBy.length) return await client.db(connection.database).collection(source).countDocuments(filters);
             const groupId = Object.fromEntries(plan.groupBy.map((field) => {
                 if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                return [field, `$${field}`];
+                return [field, mongoGroupedField(field, chart)];
             }));
             const grouped = await client.db(connection.database).collection(source).aggregate([{ $match: filters }, { $group: { _id: groupId } }, { $count: 'total' }]).toArray();
             return Number((grouped[0] as { total?: number } | undefined)?.total ?? 0);
@@ -381,8 +412,9 @@ export async function countPreview(connection: Connection, source: string, plan:
     const dialect = connection.type;
     const filters = buildSqlFilters(plan, dialect);
     const table = dialect === 'mssql' ? quoteIdentifier(source) : quoteField(source, dialect);
+    const groupedFields = plan.groupBy.map((field) => sqlGroupedField(field, chart, dialect));
     const countQuery = plan.groupBy.length
-        ? `SELECT COUNT(*) AS total FROM (SELECT ${plan.groupBy.map((field) => quoteField(field, dialect)).join(', ')} FROM ${table}${filters.where} GROUP BY ${plan.groupBy.map((field) => quoteField(field, dialect)).join(', ')}) AS grouped_results`
+        ? `SELECT COUNT(*) AS total FROM (SELECT ${groupedFields.join(', ')} FROM ${table}${filters.where} GROUP BY ${groupedFields.join(', ')}) AS grouped_results`
         : `SELECT COUNT(*) AS total FROM ${table}${filters.where}`;
     if (dialect === 'mssql') {
         const pool = await sql.connect({ user: connection.username, password, server: connection.host, port: connection.port, database: connection.database, options: { encrypt: connection.tls, trustServerCertificate: !connection.tls }, requestTimeout: 10_000 });
