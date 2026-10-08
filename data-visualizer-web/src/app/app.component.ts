@@ -36,6 +36,7 @@ export class AppComponent implements OnInit {
   showConnectionForm = false;
   isSaving = false;
   isTestingNewConnection = false;
+  isRefreshingStatuses = false;
   isGenerating = false;
   isConfirmingDraft = false;
   testedConnectionFingerprint = '';
@@ -63,7 +64,21 @@ export class AppComponent implements OnInit {
   get connectionTestPassed(): boolean { return this.testedConnectionFingerprint === JSON.stringify(this.newConnection); }
 
   ngOnInit(): void { this.loadConnections(); this.loadVisualizations(); }
-  loadConnections(): void { this.http.get<Connection[]>(`${this.apiUrl}/connections`).subscribe({ next: (items) => { this.connections = items; this.apiOnline = true; }, error: () => { this.apiOnline = false; this.notice = 'API is offline. Start the Compose stack to connect live data.'; } }); }
+  loadConnections(): void { this.http.get<Connection[]>(`${this.apiUrl}/connections`).subscribe({ next: (items) => { this.connections = items; this.apiOnline = true; this.refreshConnectionStatuses(); }, error: () => { this.apiOnline = false; this.notice = 'API is offline. Start the Compose stack to connect live data.'; } }); }
+  refreshConnectionStatuses(): void {
+    if (!this.connections.length) return;
+    this.isRefreshingStatuses = true;
+    let pending = this.connections.length;
+    const complete = () => { pending -= 1; if (!pending) this.isRefreshingStatuses = false; };
+    for (const connection of this.connections) {
+      this.updateConnectionStatus(connection.id, 'Checking...');
+      this.http.post<{ ok: boolean }>(`${this.apiUrl}/connections/${connection.id}/test`, {}).subscribe({
+        next: (result) => { this.updateConnectionStatus(connection.id, result.ok ? 'Connected' : 'Offline'); complete(); },
+        error: () => { this.updateConnectionStatus(connection.id, 'Offline'); complete(); }
+      });
+    }
+  }
+  private updateConnectionStatus(id: string, status: string): void { this.connections = this.connections.map((connection) => connection.id === id ? { ...connection, status } : connection); }
   loadVisualizations(): void { this.http.get<Visualization[]>(`${this.apiUrl}/visualizations`).subscribe({ next: (items) => this.visualizations = items, error: () => undefined }); }
   loadSchema(): void {
     if (!this.query.connectionId || !this.query.source.trim()) { this.schemaColumns = []; return; }
