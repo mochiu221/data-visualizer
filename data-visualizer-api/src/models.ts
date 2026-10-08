@@ -21,13 +21,16 @@ export const connectionUpdate = connectionFields.extend({ password: z.string().m
     if (value.type !== 'mongodb' && !value.username) context.addIssue({ code: z.ZodIssueCode.custom, path: ['username'], message: 'Username is required for this database type.' });
 });
 
+export const joinSchema = z.object({ source: z.string().min(1).max(120), leftField: z.string().min(1).max(80), rightField: z.string().min(1).max(80), type: z.enum(['inner', 'left']).default('inner') });
 export const visualizationInput = z.object({
     title: z.string().min(1).max(120),
     connectionId: z.string(),
     source: z.string().min(1).max(120),
+    join: joinSchema.optional(),
     request: z.string().min(1).max(500),
     type: z.enum(['bar', 'line', 'donut', 'table']).optional()
 });
+export type JoinDefinition = z.infer<typeof joinSchema>;
 
 export type Connection = z.infer<typeof connectionInput> & { id: string; createdAt: string; password: string };
 

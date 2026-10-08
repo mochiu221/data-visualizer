@@ -13,7 +13,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const options: Record<string, Array<string | number | boolean>> = {};
         for (const control of visualization.filterControls) {
             if (!control.category) continue;
-            const values = await listDistinctValues(connection, visualization.source, control.field);
+            const values = await listDistinctValues(connection, visualization.source, control.field, visualization.join);
             if (values.length >= 100) throw new Error(`Category field '${control.field}' has 100 or more unique values.`);
             options[`${control.field}::${control.operator}`] = values;
         }
@@ -21,7 +21,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
     };
     const persistVisualization = async (visualization: Visualization): Promise<void> => {
         if (metadataDb) {
-            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, select_mode, default_selects, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), visualization.selectMode, JSON.stringify(visualization.defaultSelects), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
+            await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, join_definition, request, type, schema_data, query_plan, filter_controls, select_mode, default_selects, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.join ? JSON.stringify(visualization.join) : null, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), visualization.selectMode, JSON.stringify(visualization.defaultSelects), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
         }
         visualizations.unshift(visualization);
     };
@@ -35,10 +35,10 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const connection = connections.find((item) => item.id === visualization.connectionId);
             if (!connection) return reply.code(404).send({ message: 'The visualization connection no longer exists.' });
             const plan = normalizedQueryPlan(visualization);
-            const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
-            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart) : undefined;
+            const data = await queryPreview(connection, visualization.source, plan, visualization.chart, visualization.join);
+            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart, visualization.join) : undefined;
             const filterOptions = await categoryOptions(visualization, connection);
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart, visualization.join), queryParameters: buildPreviewParameters(connection, plan, visualization.join), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {
             return reply.code(502).send({ message: error instanceof Error ? error.message : 'Visualization query failed.' });
         }
@@ -53,10 +53,10 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const body = request.body as { filters?: unknown; page?: unknown } | undefined;
             const plan = visualization.type === 'table' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 20 } : visualization.type === 'bar' ? { ...applyFilterValues(visualization, body?.filters ?? {}), pageSize: 1000 } : applyFilterValues(visualization, body?.filters ?? {});
             if (typeof body?.page === 'number' && Number.isInteger(body.page) && body.page >= 1) plan.page = body.page;
-            const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
-            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart) : undefined;
+            const data = await queryPreview(connection, visualization.source, plan, visualization.chart, visualization.join);
+            const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan, visualization.chart, visualization.join) : undefined;
             const filterOptions = await categoryOptions(visualization, connection);
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart, visualization.join), queryParameters: buildPreviewParameters(connection, plan, visualization.join), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Visualization query failed.';
             return reply.code(message.startsWith('Filter') || message.startsWith('Invalid') ? 400 : 502).send({ message });
@@ -78,11 +78,16 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         if (!parsed.success) return reply.code(400).send({ message: 'Invalid visualization request', issues: parsed.error.flatten() });
         const connection = connections.find((item) => item.id === parsed.data.connectionId);
         if (!connection) return reply.code(404).send({ message: 'Select a saved database connection before generating a visualization.' });
+        if (parsed.data.join && connection.type === 'mongodb') return reply.code(400).send({ message: 'Joining collections is not supported for MongoDB.' });
+        const join = parsed.data.join;
         let schema: SchemaColumn[];
         let sampleRows: Array<Record<string, string | number>>;
         try {
-            schema = await discoverSchema(connection, parsed.data.source);
-            sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 });
+            const primarySchema = await discoverSchema(connection, parsed.data.source);
+            const joinedSchema = join ? await discoverSchema(connection, join.source) : [];
+            if (join && (!primarySchema.some((column) => column.name === join.leftField) || !joinedSchema.some((column) => column.name === join.rightField))) throw new Error('The selected join fields are not present in their respective tables.');
+            schema = [...primarySchema, ...(join ? joinedSchema.map((column) => ({ ...column, name: `joined.${column.name}` })) : [])];
+            sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 }, undefined, join);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Schema discovery or sample-row query failed.';
             app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery or sample-row query failed');
@@ -129,7 +134,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         definition = { ...definition, selectMode, defaultSelects };
         try {
             const categoryControls = definition.filterControls.filter((control) => control.category);
-            const categoryValidityEntries = await Promise.all(categoryControls.map(async (control) => [control.field, (await listDistinctValues(connection, parsed.data.source, control.field)).length < 100] as const));
+            const categoryValidityEntries = await Promise.all(categoryControls.map(async (control) => [control.field, (await listDistinctValues(connection, parsed.data.source, control.field, join)).length < 100] as const));
             const categoryValidity = new Map(categoryValidityEntries);
             definition = { ...definition, filterControls: definition.filterControls.map((control) => control.category ? { ...control, category: categoryValidity.get(control.field) === true } : control) };
         } catch (error) {
@@ -147,8 +152,8 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             definition,
             visualization: {
                 ...visualization,
-                query: buildPreviewQuery(connection, visualization.source, visualization.queryPlan, visualization.chart),
-                queryParameters: buildPreviewParameters(connection, visualization.queryPlan)
+                query: buildPreviewQuery(connection, visualization.source, visualization.queryPlan, visualization.chart, visualization.join),
+                queryParameters: buildPreviewParameters(connection, visualization.queryPlan, visualization.join)
             }
         });
     });

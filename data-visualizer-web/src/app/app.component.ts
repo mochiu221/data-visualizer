@@ -9,7 +9,8 @@ type DatabaseType = 'mssql' | 'mongodb' | 'postgresql' | 'mysql';
 type ChartType = 'bar' | 'line' | 'donut' | 'table';
 interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; hasPassword: boolean; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
-interface Visualization { id: string; title: string; source: string; type: ChartType; createdAt: string; }
+interface JoinDefinition { source: string; leftField: string; rightField: string; type: 'inner' | 'left'; }
+interface Visualization { id: string; title: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
 interface QueryPlanPreview { filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAggregation: string; }
@@ -52,14 +53,20 @@ export class AppComponent implements OnInit {
   connectionMenuId = '';
   editingConnectionId = '';
   schemaColumns: Array<{ name: string; type: string }> = [];
+  joinSchemaColumns: Array<{ name: string; type: string }> = [];
   tables: TableSource[] = [];
   isLoadingTables = false;
   isLoadingSchema = false;
   query = { connectionId: '', source: '', request: '' };
+  joinSource = '';
+  joinType: JoinDefinition['type'] = 'inner';
+  joinLeftField = '';
+  joinRightField = '';
   newConnection = { name: '', type: 'mssql' as DatabaseType, host: '', port: 1433, database: '', username: '', password: '', tls: false };
   readonly todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date()).toUpperCase();
   get isDetailPage(): boolean { return this.router.url.startsWith('/visualizations/'); }
   get activeView(): string { return this._activeView; }
+  get selectedConnection(): Connection | undefined { return this.connections.find((connection) => connection.id === this.query.connectionId); }
   set activeView(value: string) { this._activeView = value; this.notice = ''; }
   get connectionTestPassed(): boolean { return this.testedConnectionFingerprint === JSON.stringify(this.newConnection); }
 
@@ -88,10 +95,21 @@ export class AppComponent implements OnInit {
       error: (response) => { this.schemaColumns = []; this.isLoadingSchema = false; this.notice = response.error?.message ?? 'Could not read the source schema.'; }
     });
   }
+  loadJoinSchema(): void {
+    if (!this.query.connectionId || !this.joinSource.trim()) { this.joinSchemaColumns = []; this.joinLeftField = ''; this.joinRightField = ''; return; }
+    this.http.get<{ columns: Array<{ name: string; type: string }> }>(`${this.apiUrl}/schema/${this.query.connectionId}?source=${encodeURIComponent(this.joinSource.trim())}`).subscribe({
+      next: (result) => { this.joinSchemaColumns = result.columns; this.joinLeftField = ''; this.joinRightField = ''; },
+      error: (response) => { this.joinSchemaColumns = []; this.notice = response.error?.message ?? 'Could not read the joined source schema.'; }
+    });
+  }
   selectConnection(): void {
     this.query.source = '';
+    this.joinSource = '';
+    this.joinLeftField = '';
+    this.joinRightField = '';
     this.tables = [];
     this.schemaColumns = [];
+    this.joinSchemaColumns = [];
     if (!this.query.connectionId) return;
     this.isLoadingTables = true;
     this.http.get<{ tables: TableSource[] }>(`${this.apiUrl}/tables/${this.query.connectionId}`).subscribe({
@@ -156,8 +174,10 @@ export class AppComponent implements OnInit {
     if (!this.query.connectionId) { this.notice = 'Select a saved database connection first.'; return; }
     if (!this.query.source.trim()) { this.notice = 'Select a table or collection before creating a visualization.'; return; }
     if (!this.query.request.trim()) { this.notice = 'Describe what you want to see before creating a visualization.'; return; }
+    const join = this.joinSource.trim() ? { source: this.joinSource.trim(), leftField: this.joinLeftField, rightField: this.joinRightField, type: this.joinType } : undefined;
+    if (join && (!join.leftField || !join.rightField)) { this.notice = 'Choose both fields for the table join.'; return; }
     this.isGenerating = true;
-    this.http.post<VisualizationDraftResponse>(`${this.apiUrl}/visualizations/generate`, { ...this.query, title: this.query.request }).subscribe({ next: (draft) => { this.pendingDraftId = draft.draftId; this.pendingDefinition = draft.definition; this.pendingVisualization = draft.visualization; this.isGenerating = false; this.notice = 'Review the generated definition before saving it.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The visualization definition could not be generated.'; } });
+    this.http.post<VisualizationDraftResponse>(`${this.apiUrl}/visualizations/generate`, { ...this.query, ...(join ? { join } : {}), title: this.query.request }).subscribe({ next: (draft) => { this.pendingDraftId = draft.draftId; this.pendingDefinition = draft.definition; this.pendingVisualization = draft.visualization; this.isGenerating = false; this.notice = 'Review the generated definition before saving it.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The visualization definition could not be generated.'; } });
   }
   confirmVisualization(): void {
     if (!this.pendingDraftId) return;

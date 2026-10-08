@@ -216,6 +216,30 @@
                 </option>
               </select></label
             >
+            <div class="join-controls" *ngIf="selectedConnection && selectedConnection.type !== 'mongodb'">
+              <span class="eyebrow">OPTIONAL JOIN</span>
+              <label
+                >Join with table<select [(ngModel)]="joinSource" (change)="loadJoinSchema()" [disabled]="!query.connectionId || !query.source || isLoadingTables">
+                  <option value="">No second table</option>
+                  <option *ngFor="let table of tables" [value]="table.name">{{ table.name }} · {{ table.type }}</option>
+                </select></label
+              >
+              <div class="join-fields" *ngIf="joinSource">
+                <label
+                  >Join type<select [(ngModel)]="joinType"><option value="inner">Inner join</option><option value="left">Left join</option></select></label
+                >
+                <label
+                  >First table field<select [(ngModel)]="joinLeftField"><option value="" disabled>Select field</option><option *ngFor="let column of schemaColumns" [value]="column.name">{{ column.name }}</option></select></label
+                >
+                <label
+                  >Second table field<select [(ngModel)]="joinRightField"><option value="" disabled>Select field</option><option *ngFor="let column of joinSchemaColumns" [value]="column.name">{{ column.name }}</option></select></label
+                >
+              </div>
+              <div class="schema-preview" *ngIf="joinSchemaColumns.length">
+                <span class="eyebrow">JOINED SCHEMA</span><span class="schema-field" *ngFor="let column of joinSchemaColumns">{{ column.name }} <small>{{ column.type }}</small></span>
+              </div>
+            </div>
+            <p class="join-note" *ngIf="selectedConnection?.type === 'mongodb'">MongoDB connections support one collection at a time.</p>
             <div
               class="schema-preview"
               *ngIf="isLoadingSchema || schemaColumns.length"
