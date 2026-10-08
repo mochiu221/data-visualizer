@@ -124,6 +124,42 @@ export async function verifyConnection(connection: Connection): Promise<void> {
     try { await connectionHandle.query('SELECT 1'); } finally { await connectionHandle.end(); }
 }
 
+export async function listDistinctValues(connection: Connection, source: string, field: string): Promise<Array<string | number | boolean>> {
+    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Category field contains invalid characters.');
+    if (connection.type === 'mongodb') {
+        if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
+        const password = connection.password ? decrypt(connection.password) : '';
+        const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
+        try {
+            await client.connect();
+            const values = await client.db(connection.database).collection(source).distinct(field);
+            return values.filter((value): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value)).slice(0, 100);
+        } finally { await client.close(); }
+    }
+    const password = connection.password ? decrypt(connection.password) : '';
+    const fieldSql = quoteField(field, connection.type);
+    const tableSql = connection.type === 'mssql' ? quoteIdentifier(source) : quoteField(source, connection.type);
+    if (connection.type === 'mssql') {
+        const pool = await sql.connect({ user: connection.username, password, server: connection.host, port: connection.port, database: connection.database, options: { encrypt: connection.tls, trustServerCertificate: !connection.tls }, requestTimeout: 10_000 });
+        try {
+            const result = await pool.request().query(`SELECT TOP 100 ${fieldSql} AS value FROM ${tableSql} WHERE ${fieldSql} IS NOT NULL GROUP BY ${fieldSql} ORDER BY ${fieldSql}`);
+            return result.recordset.map((row) => row.value).filter((value): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value));
+        } finally { await pool.close(); }
+    }
+    if (connection.type === 'postgresql') {
+        const client = new pg.Client({ host: connection.host, port: connection.port, database: connection.database, user: connection.username, password, ssl: connection.tls ? { rejectUnauthorized: false } : false, statement_timeout: 10_000 });
+        try {
+            const result = await client.query(`SELECT DISTINCT ${fieldSql} AS value FROM ${tableSql} WHERE ${fieldSql} IS NOT NULL ORDER BY ${fieldSql} LIMIT 100`);
+            return result.rows.map((row) => row.value).filter((value): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value));
+        } finally { await client.end(); }
+    }
+    const connectionHandle = await mysql.createConnection({ host: connection.host, port: connection.port, database: connection.database, user: connection.username, password, ssl: connection.tls ? {} : undefined, connectTimeout: 10_000 });
+    try {
+        const [rows] = await connectionHandle.query(`SELECT DISTINCT ${fieldSql} AS value FROM ${tableSql} WHERE ${fieldSql} IS NOT NULL ORDER BY ${fieldSql} LIMIT 100`);
+        return (rows as Array<{ value: unknown }>).map((row) => row.value).filter((value): value is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof value));
+    } finally { await connectionHandle.end(); }
+}
+
 export function quoteField(field: string, dialect: 'mssql' | 'postgresql' | 'mysql'): string {
     if (!/^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)?$/.test(field)) throw new Error('Filter or sort field contains invalid characters.');
     const quote = dialect === 'mssql' ? ['[', ']'] : dialect === 'mysql' ? ['`', '`'] : ['"', '"'];
@@ -147,6 +183,13 @@ function selectionField(selection: SelectField): string { return selection.field
 
 function chartMeasures(chart: ChartDefinition | undefined): ChartDefinition['yAxis'][] {
     return chart?.yAxes?.length ? chart.yAxes : chart ? [chart.yAxis] : [];
+}
+
+function defaultGroupedSort(groupBy: string[], dialect: 'mssql' | 'postgresql' | 'mysql'): string {
+    const field = quoteField(groupBy[0], dialect);
+    if (dialect === 'mssql') return ` ORDER BY CASE WHEN ${field} IS NULL THEN 1 ELSE 0 END, ${field} ASC`;
+    if (dialect === 'postgresql') return ` ORDER BY ${field} ASC NULLS LAST`;
+    return ` ORDER BY ${field} IS NULL, ${field} ASC`;
 }
 
 function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): { select: string; groupBy: string } {
@@ -184,7 +227,9 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
             const aggregation = chart?.yAggregation ?? 'count';
             const measures = chartMeasures(chart);
             const groupCalculations = aggregation === 'sum' ? Object.fromEntries(measures.map((measure) => [measure.field, { $sum: `$${measure.field}` }])) : aggregation === 'average' ? Object.fromEntries(measures.map((measure) => [measure.field, { $avg: `$${measure.field}` }])) : aggregation === 'min' ? Object.fromEntries(measures.map((measure) => [measure.field, { $min: `$${measure.field}` }])) : aggregation === 'max' ? Object.fromEntries(measures.map((measure) => [measure.field, { $max: `$${measure.field}` }])) : { count: { $sum: 1 } };
-            const sortStage = plan.sort ? `, ${JSON.stringify({ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } })}` : '';
+            const sortStage = plan.sort
+                ? `, ${JSON.stringify({ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } })}`
+                : `, ${JSON.stringify({ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.${plan.groupBy[0]}`, null] }, 1, 0] } } })}, ${JSON.stringify({ $sort: { __categoryNullRank: 1, [`_id.${plan.groupBy[0]}`]: 1 } })}`;
             return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, ...groupCalculations } })}${sortStage}])`;
         }
         const sort = plan.sort ? `.sort(${JSON.stringify({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 })})` : '';
@@ -197,7 +242,7 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
     const projection = groupedSqlProjection(plan, chart, dialect);
     const sort = plan.sort
         ? ` ORDER BY ${quoteField(plan.sort.field, dialect)} ${plan.sort.direction.toUpperCase()}`
-        : dialect === 'mssql' ? ' ORDER BY (SELECT NULL)' : '';
+        : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, dialect) : dialect === 'mssql' ? ' ORDER BY (SELECT NULL)' : '';
     const pagination = dialect === 'mssql'
         ? ` OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`
         : ` LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`;
@@ -239,11 +284,20 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
                     { $group: { _id: groupId, ...groupCalculations } },
-                    ...(plan.sort ? [{ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } }] : []),
+                    ...(plan.sort ? [{ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } }] : [{ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.${plan.groupBy[0]}`, null] }, 1, 0] } } }, { $sort: { __categoryNullRank: 1, [`_id.${plan.groupBy[0]}`]: 1 } }]),
                     { $skip: (plan.page - 1) * plan.pageSize },
                     { $limit: plan.pageSize }
                 ]).toArray();
-                return grouped.map((row) => ({ ...row._id as Record<string, unknown>, ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id')) }));
+                const normalized = grouped.map((row) => ({ ...row._id as Record<string, unknown>, ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id' && key !== '__categoryNullRank')) }));
+                if (!plan.sort) normalized.sort((left, right) => {
+                    const leftValue = left[plan.groupBy[0]];
+                    const rightValue = right[plan.groupBy[0]];
+                    if (leftValue == null && rightValue == null) return 0;
+                    if (leftValue == null) return 1;
+                    if (rightValue == null) return -1;
+                    return String(leftValue).localeCompare(String(rightValue), undefined, { numeric: true });
+                });
+                return normalized;
             }
             plan.select.forEach((selection) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
             const projection = plan.select.length ? { projection: Object.fromEntries(plan.select.map((selection) => [selectionField(selection), 1])) } : undefined;
@@ -265,7 +319,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
             const projection = groupedSqlProjection(plan, chart, 'mssql');
             const sort = plan.sort
                 ? ` ORDER BY ${quoteField(plan.sort.field, 'mssql')} ${plan.sort.direction.toUpperCase()}`
-                : ' ORDER BY (SELECT NULL)';
+                : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'mssql') : ' ORDER BY (SELECT NULL)';
             const result = await requestHandle.query(`SELECT ${projection.select} FROM ${quoteIdentifier(source)}${filters.where}${projection.groupBy}${sort} OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`);
             return result.recordset.map(normalizePreview);
         } finally {
@@ -279,7 +333,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
             await client.connect();
             const filters = buildSqlFilters(plan, 'postgresql');
             const projection = groupedSqlProjection(plan, chart, 'postgresql');
-            const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'postgresql')} ${plan.sort.direction.toUpperCase()}` : '';
+            const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'postgresql')} ${plan.sort.direction.toUpperCase()}` : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'postgresql') : '';
             const result = await client.query(`SELECT ${projection.select} FROM ${quoteField(source, 'postgresql')}${filters.where}${projection.groupBy}${sort} LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`, filters.values);
             return result.rows.map(normalizePreview);
         } finally {
@@ -291,7 +345,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
     try {
         const filters = buildSqlFilters(plan, 'mysql');
         const projection = groupedSqlProjection(plan, chart, 'mysql');
-        const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'mysql')} ${plan.sort.direction.toUpperCase()}` : '';
+        const sort = plan.sort ? ` ORDER BY ${quoteField(plan.sort.field, 'mysql')} ${plan.sort.direction.toUpperCase()}` : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'mysql') : '';
         const [rows] = await connectionHandle.query(`SELECT ${projection.select} FROM ${quoteField(source, 'mysql')}${filters.where}${projection.groupBy}${sort} LIMIT ? OFFSET ?`, [...filters.values, plan.pageSize, (plan.page - 1) * plan.pageSize]);
         const records = rows as Array<Record<string, unknown>>;
         return records.map(normalizePreview);

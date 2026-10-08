@@ -10,7 +10,7 @@ type ChartType = 'bar' | 'line' | 'donut' | 'table';
 interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; hasPassword: boolean; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface Visualization { id: string; title: string; source: string; type: ChartType; createdAt: string; }
-interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; }
+interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
 interface QueryPlanPreview { filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAggregation: string; }
 interface VisualizationDefinitionPreview { queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; title: string; type: ChartType; chart: ChartPreview; }

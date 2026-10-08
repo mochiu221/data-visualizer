@@ -1,14 +1,24 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { aiProvider, metadataDb } from '../config.js';
-import { connections, generatedDefinition, visualizationInput, visualizations, type SchemaColumn, type Visualization } from '../models.js';
+import { connections, generatedDefinition, visualizationInput, visualizations, type Connection, type SchemaColumn, type Visualization } from '../models.js';
 import { generateDefinition } from '../ai.js';
 import { applyFilterValues } from '../filters.js';
-import { buildPreviewParameters, buildPreviewQuery, countPreview, discoverSchema, queryPreview } from '../database.js';
+import { buildPreviewParameters, buildPreviewQuery, countPreview, discoverSchema, listDistinctValues, queryPreview } from '../database.js';
 
 export function registerVisualizationRoutes(app: FastifyInstance): void {
     const drafts = new Map<string, Visualization>();
     const normalizedQueryPlan = (visualization: Visualization): Visualization['queryPlan'] => visualization.type === 'table' ? { ...visualization.queryPlan, pageSize: 20 } : visualization.queryPlan;
+    const categoryOptions = async (visualization: Visualization, connection: Connection): Promise<Record<string, Array<string | number | boolean>>> => {
+        const options: Record<string, Array<string | number | boolean>> = {};
+        for (const control of visualization.filterControls) {
+            if (!control.category) continue;
+            const values = await listDistinctValues(connection, visualization.source, control.field);
+            if (values.length >= 100) throw new Error(`Category field '${control.field}' has 100 or more unique values.`);
+            options[`${control.field}::${control.operator}`] = values;
+        }
+        return options;
+    };
     const persistVisualization = async (visualization: Visualization): Promise<void> => {
         if (metadataDb) {
             await metadataDb.query('INSERT INTO saved_visualizations (id, title, connection_id, source, request, type, schema_data, query_plan, filter_controls, chart_definition, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [visualization.id, visualization.title, visualization.connectionId, visualization.source, visualization.request, visualization.type, JSON.stringify(visualization.schema), JSON.stringify(visualization.queryPlan), JSON.stringify(visualization.filterControls), JSON.stringify(visualization.chart), visualization.createdAt, visualization.updatedAt]);
@@ -27,7 +37,8 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             const plan = normalizedQueryPlan(visualization);
             const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
             const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan) : undefined;
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
+            const filterOptions = await categoryOptions(visualization, connection);
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {
             return reply.code(502).send({ message: error instanceof Error ? error.message : 'Visualization query failed.' });
         }
@@ -44,7 +55,8 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
             if (typeof body?.page === 'number' && Number.isInteger(body.page) && body.page >= 1) plan.page = body.page;
             const data = await queryPreview(connection, visualization.source, plan, visualization.chart);
             const total = visualization.type === 'table' ? await countPreview(connection, visualization.source, plan) : undefined;
-            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
+            const filterOptions = await categoryOptions(visualization, connection);
+            return { ...visualization, query: buildPreviewQuery(connection, visualization.source, plan, visualization.chart), queryParameters: buildPreviewParameters(connection, plan), queryPlan: plan, filterOptions, ...(total === undefined ? {} : { total, pagination: { page: plan.page, pageSize: plan.pageSize, total, totalPages: Math.max(1, Math.ceil(total / plan.pageSize)) } }), data };
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Visualization query failed.';
             return reply.code(message.startsWith('Filter') || message.startsWith('Invalid') ? 400 : 502).send({ message });
@@ -105,6 +117,15 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const duplicateControls = definition.filterControls.map((control) => `${control.field}::${control.operator}`).filter((key, index, keys) => keys.indexOf(key) !== index);
         if (duplicateControls.length) {
             return reply.code(502).send({ message: `The AI returned duplicate filter controls for: ${duplicateControls[0]}` });
+        }
+        try {
+            const categoryControls = definition.filterControls.filter((control) => control.category);
+            const categoryValidityEntries = await Promise.all(categoryControls.map(async (control) => [control.field, (await listDistinctValues(connection, parsed.data.source, control.field)).length < 100] as const));
+            const categoryValidity = new Map(categoryValidityEntries);
+            definition = { ...definition, filterControls: definition.filterControls.map((control) => control.category ? { ...control, category: categoryValidity.get(control.field) === true } : control) };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Category validation failed.';
+            return reply.code(502).send({ message });
         }
         const now = new Date().toISOString();
         const queryPlan = definition.type === 'table' ? { ...definition.queryPlan, pageSize: 20 } : definition.queryPlan;

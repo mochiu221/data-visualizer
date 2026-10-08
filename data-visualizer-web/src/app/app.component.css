@@ -37,12 +37,19 @@ nav { display: grid; gap: 4px; } nav button { border: 0; background: transparent
 .viz-card h3 { font: 400 23px Georgia, serif; line-height: 1.15; margin: 9px 0 7px; overflow-wrap: anywhere; }
 .viz-card .card-head small { color: var(--muted); font: 11px Arial; }
 .viz-card .more { align-items: center; background: #f7faf7; border: 1px solid var(--line); border-radius: 50%; color: #8c9890; cursor: pointer; display: inline-flex; flex: 0 0 30px; font-size: 18px; height: 30px; justify-content: center; line-height: 1; transition: background .2s ease, color .2s ease; }
+.viz-card .delete-action { position: relative; }
+.viz-card .delete-action::before { border: 1.5px solid currentColor; border-top: 0; border-radius: 0 0 2px 2px; content: ''; height: 10px; width: 8px; }
+.viz-card .delete-action::after { background: currentColor; border-radius: 1px; content: ''; height: 2px; position: absolute; top: 8px; width: 12px; }
 .viz-card .more:hover { background: #fff0ed; border-color: #efc9c0; color: #b24e3e; }
 .checking i{background:#da4}
 .chart-card-placeholder { align-items: start; background: linear-gradient(135deg, #f2f8f3, #fbfcfb); border: 1px solid #e2ece4; border-radius: 9px; display: flex; flex-direction: column; gap: 8px; margin-top: 25px; min-height: 145px; padding: 18px; }
-.chart-card-placeholder > span { align-items: center; background: #dff2e7; border-radius: 8px; color: var(--green); display: inline-flex; font-size: 18px; height: 34px; justify-content: center; width: 34px; }
+.chart-card-placeholder > span { align-items: center; background: #dff2e7; border-radius: 8px; color: var(--green); display: inline-flex; font-size: 18px; height: 34px; justify-content: center; position: relative; width: 34px; }
+.chart-card-placeholder > span::before { background: var(--green); box-shadow: 6px -5px 0 #71b38e, 12px -9px 0 #9acbad; content: ''; height: 8px; width: 4px; }
 .chart-card-placeholder p { color: var(--muted); font: 12px/1.5 Arial; margin: 2px 0 auto; }
 .chart-card-placeholder a { color: var(--green); font: 700 12px Arial; text-decoration: none; }.chart-card-placeholder a:hover { text-decoration: underline; }
 .confirm-modal { width: min(480px, 100%); }.confirm-copy { color: var(--muted); font: 14px/1.6 Arial; margin: -5px 0 22px; overflow-wrap: anywhere; }.confirm-actions { justify-content: end; margin-top: 0; }.confirm-actions .secondary, .confirm-actions .danger { box-sizing: border-box; min-height: 40px; margin-top: 0; padding: 0 18px; }.danger { background: #b24e3e; border: 0; border-radius: 5px; color: #fff; cursor: pointer; font: 700 12px Arial; }.danger:hover { background: #963f32; }
 .connection-menu { position: relative; }.action-menu { position: absolute; top: calc(100% + 7px); right: 0; z-index: 3; display: grid; min-width: 160px; padding: 5px; background: #fff; border: 1px solid var(--line); border-radius: 6px; }.action-menu button { border: 0; background: transparent; color: var(--ink); padding: 9px 10px; text-align: left; font: 12px Arial; cursor: pointer; }
 .connection-list { overflow: visible; }
+.close { position: relative; }
+.close::before, .close::after { background: currentColor; content: ''; height: 1.5px; left: 6px; position: absolute; top: 12px; width: 12px; }
+.close::before { transform: rotate(45deg); }.close::after { transform: rotate(-45deg); }

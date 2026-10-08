@@ -40,7 +40,8 @@ export const filterControlSchema = z.object({
     label: z.string().min(1).max(120),
     type: z.enum(['text', 'number', 'boolean', 'date', 'time', 'datetime']),
     operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains']),
-    range: z.enum(['from', 'to']).optional()
+    range: z.enum(['from', 'to']).optional(),
+    category: z.boolean().default(false)
 });
 
 export type FilterControl = z.infer<typeof filterControlSchema>;

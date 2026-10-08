@@ -43,9 +43,10 @@ interface Visualization {
   source: string;
   type: 'bar' | 'line' | 'donut' | 'table';
   data: Array<Record<string, string | number>>;
+  filterOptions?: Record<string, Array<string | number | boolean>>;
   schema?: Array<{ name: string; type: string }>;
   chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAxes?: Array<{ field: string; label: string; scale?: 'category' | 'time' }>; yAggregation: string };
-  filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to' }>;
+  filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to'; category?: boolean }>;
   queryPlan?: { page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
 }
 type FilterValue = string | number | boolean | null;
