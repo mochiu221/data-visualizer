@@ -107,13 +107,9 @@
                 }}</small>
               </div>
             </div>
-            <div class="chart-card-placeholder">
-              <span></span>
-              <p>Visualization data loads on its page.</p>
-              <a [routerLink]="['/visualizations', visualization.id]"
-                >Open visualization
-              </a>
-            </div>
+            <a class="chart-card-placeholder" [routerLink]="['/visualizations', visualization.id]">
+              <span>Open visualization</span>
+            </a>
           </article>
         </section>
       </div>
@@ -164,13 +160,9 @@
               >
               </button>
             </div>
-            <div class="chart-card-placeholder">
-              <span></span>
-              <p>Visualization data loads on its page.</p>
-              <a [routerLink]="['/visualizations', visualization.id]"
-                >Open visualization
-              </a>
-            </div>
+            <a class="chart-card-placeholder" [routerLink]="['/visualizations', visualization.id]">
+              <span>Open visualization</span>
+            </a>
           </article>
         </section>
         <div class="empty-state" *ngIf="visualizations.length === 0">
