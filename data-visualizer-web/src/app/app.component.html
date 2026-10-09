@@ -1,5 +1,6 @@
 <ng-container *ngIf="!isDetailPage"
   ><div class="shell" (click)="connectionMenuId = ''">
+    <div class="notice" *ngIf="notice" [class.notice-success]="noticeType === 'success'" [class.notice-error]="noticeType === 'error'" [class.notice-warning]="noticeType === 'warning'" [class.notice-info]="noticeType === 'info'" [attr.role]="noticeType === 'error' ? 'alert' : 'status'" aria-live="polite">{{ notice }}</div>
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark">/ /</span
@@ -68,7 +69,6 @@
             + New visualization
           </button>
         </section>
-        <p class="notice" *ngIf="notice">{{ notice }}</p>
         <section class="stats real-stats">
           <div class="stat">
             <span>Visualizations</span
@@ -127,7 +127,6 @@
             + New visualization
           </button>
         </section>
-        <p class="notice" *ngIf="notice">{{ notice }}</p>
         <section class="viz-grid">
           <article
             class="viz-card create-card"
@@ -182,7 +181,6 @@
             </p>
           </div>
         </section>
-        <p class="notice" *ngIf="notice">{{ notice }}</p>
         <div class="studio-grid">
           <section class="panel form-panel">
             <label
@@ -277,6 +275,7 @@
           </section>
           <section
             class="panel preview-panel"
+            #previewPanel
             [class.is-generating]="isGenerating"
             [attr.aria-busy]="isGenerating"
           >
@@ -439,7 +438,6 @@
             + Add connection
           </button>
         </section>
-        <p class="notice" *ngIf="notice">{{ notice }}</p>
         <section class="draft-actions" style="margin:0 0 8px">
           <button
             class="secondary refresh-status"

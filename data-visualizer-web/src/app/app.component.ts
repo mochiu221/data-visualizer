@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, ElementRef, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink, RouterOutlet } from '@angular/router';
 import { of } from 'rxjs';
@@ -28,12 +28,16 @@ interface VisualizationDraftResponse { draftId: string; definition: Visualizatio
 export class AppComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
+  @ViewChild('previewPanel') private previewPanel?: ElementRef<HTMLElement>;
   readonly apiUrl = 'http://localhost:3000/api';
   readonly databaseTypes: DatabaseType[] = ['mssql', 'mongodb', 'postgresql', 'mysql'];
   readonly maskedPassword = '********';
   connections: Connection[] = [];
   visualizations: Visualization[] = [];
   private _activeView = 'overview';
+  private _notice = '';
+  private noticeTimeout?: ReturnType<typeof setTimeout>;
+  noticeType: 'success' | 'error' | 'warning' | 'info' = 'info';
   showConnectionForm = false;
   isSaving = false;
   isTestingNewConnection = false;
@@ -44,7 +48,6 @@ export class AppComponent implements OnInit {
   connectionTestMessage = '';
   connectionTestFailed = false;
   apiOnline = false;
-  notice = '';
   pendingDraftId = '';
   pendingVisualization?: VisualizationPreview;
   pendingDefinition?: VisualizationDefinitionPreview;
@@ -63,8 +66,25 @@ export class AppComponent implements OnInit {
   readonly todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date()).toUpperCase();
   get isDetailPage(): boolean { return this.router.url.startsWith('/visualizations/'); }
   get activeView(): string { return this._activeView; }
+  get notice(): string { return this._notice; }
+  set notice(message: string) {
+    if (this.noticeTimeout) clearTimeout(this.noticeTimeout);
+    this._notice = message;
+    this.noticeType = this.classifyNotice(message);
+    if (message) this.noticeTimeout = setTimeout(() => { this._notice = ''; this.noticeTimeout = undefined; }, 5000);
+    else this.noticeTimeout = undefined;
+  }
+  private classifyNotice(message: string): 'success' | 'error' | 'warning' | 'info' {
+    if (/\b(could not|failed|offline|invalid|not found|cannot|does not exist|no longer exists|not present|unsupported|error)\b/i.test(message)) return 'error';
+    if (/^(select|choose|describe|provide)\b/i.test(message)) return 'warning';
+    if (/\b(saved|deleted|updated|connected securely)\b/i.test(message)) return 'success';
+    return 'info';
+  }
   get selectedConnection(): Connection | undefined { return this.connections.find((connection) => connection.id === this.query.connectionId); }
-  set activeView(value: string) { this._activeView = value; this.notice = ''; }
+  set activeView(value: string) {
+    if (this._activeView !== value) window.scrollTo(0, 0);
+    this._activeView = value;
+  }
   get connectionTestPassed(): boolean { return this.testedConnectionFingerprint === JSON.stringify(this.newConnection); }
 
   ngOnInit(): void { this.loadConnections(); this.loadVisualizations(); }
@@ -171,13 +191,14 @@ export class AppComponent implements OnInit {
     if (!this.query.request.trim()) { this.notice = 'Describe what you want to see before creating a visualization.'; return; }
     const join = this.joinSource.trim() ? { source: this.joinSource.trim() } : undefined;
     this.isGenerating = true;
+    this.previewPanel?.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
     this.http.post<VisualizationDraftResponse>(`${this.apiUrl}/visualizations/generate`, { ...this.query, ...(join ? { join } : {}), title: this.query.request }).subscribe({ next: (draft) => { this.pendingDraftId = draft.draftId; this.pendingDefinition = draft.definition; this.pendingVisualization = draft.visualization; this.isGenerating = false; this.notice = 'Review the generated definition before saving it.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The visualization definition could not be generated.'; } });
   }
   confirmVisualization(): void {
     if (!this.pendingDraftId) return;
     this.isConfirmingDraft = true;
     this.http.post<Visualization>(`${this.apiUrl}/visualizations/confirm`, { draftId: this.pendingDraftId }).subscribe({
-      next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.isConfirmingDraft = false; this.notice = 'Visualization saved.'; void this.router.navigate(['/visualizations', visualization.id]); },
+      next: (visualization) => { this.visualizations = [visualization, ...this.visualizations]; this.pendingDraftId = ''; this.pendingDefinition = undefined; this.pendingVisualization = undefined; this.isConfirmingDraft = false; void this.router.navigate(['/visualizations', visualization.id]); },
       error: (response) => { this.isConfirmingDraft = false; this.notice = response.error?.message ?? 'Could not save the visualization.'; }
     });
   }

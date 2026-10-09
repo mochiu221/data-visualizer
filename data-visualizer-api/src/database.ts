@@ -226,9 +226,9 @@ function sqlGroupedField(field: string, chart: ChartDefinition | undefined, dial
         return `DATEADD(${datePart}, DATEDIFF(${datePart}, 0, ${quotedField}), 0)`;
     }
     if (unit === 'year') return `DATE_FORMAT(${quotedField}, '%Y-01-01')`;
-    if (unit === 'quarter') return `CONCAT(YEAR(${quotedField}), '-Q', QUARTER(${quotedField}))`;
+    if (unit === 'quarter') return `STR_TO_DATE(CONCAT(YEAR(${quotedField}), '-', LPAD((QUARTER(${quotedField}) - 1) * 3 + 1, 2, '0'), '-01'), '%Y-%m-%d')`;
     if (unit === 'month') return `DATE_FORMAT(${quotedField}, '%Y-%m-01')`;
-    if (unit === 'week') return `YEARWEEK(${quotedField}, 1)`;
+    if (unit === 'week') return `DATE_SUB(DATE(${quotedField}), INTERVAL WEEKDAY(${quotedField}) DAY)`;
     if (unit === 'day') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d')`;
     if (unit === 'hour') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:00:00')`;
     if (unit === 'minute') return `DATE_FORMAT(${quotedField}, '%Y-%m-%d %H:%i:00')`;
@@ -242,10 +242,19 @@ function mongoGroupedField(field: string, chart: ChartDefinition | undefined): s
 }
 
 function defaultGroupedSort(groupBy: string[], dialect: 'mssql' | 'postgresql' | 'mysql', join?: JoinDefinition): string {
-    const field = sqlQueryField(groupBy[0], join, dialect);
+    const field = sqlOutputAlias(groupBy[0], dialect);
     if (dialect === 'mssql') return ` ORDER BY CASE WHEN ${field} IS NULL THEN 1 ELSE 0 END, ${field} ASC`;
     if (dialect === 'postgresql') return ` ORDER BY ${field} ASC NULLS LAST`;
     return ` ORDER BY ${field} IS NULL, ${field} ASC`;
+}
+
+function sqlSortClause(plan: QueryPlan, chart: ChartDefinition | undefined, join: JoinDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql'): string {
+    if (!plan.sort) return '';
+    const isGroupedOutput = plan.groupBy.includes(plan.sort.field)
+        || groupedMeasureFields(plan).includes(plan.sort.field)
+        || (chart?.yAggregation === 'count' && plan.sort.field === 'count');
+    const field = isGroupedOutput ? sqlOutputAlias(plan.sort.field, dialect) : sqlQueryField(plan.sort.field, join, dialect);
+    return ` ORDER BY ${field} ${plan.sort.direction.toUpperCase()}`;
 }
 
 function groupedSqlProjection(plan: QueryPlan, chart: ChartDefinition | undefined, dialect: 'mssql' | 'postgresql' | 'mysql', join?: JoinDefinition): { select: string; groupBy: string } {
@@ -299,7 +308,7 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
     const filters = buildSqlFilters(plan, dialect, join);
     const projection = groupedSqlProjection(plan, chart, dialect, join);
     const sort = plan.sort
-        ? ` ORDER BY ${sqlQueryField(plan.sort.field, join, dialect)} ${plan.sort.direction.toUpperCase()}`
+        ? sqlSortClause(plan, chart, join, dialect)
         : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, dialect, join) : dialect === 'mssql' ? ' ORDER BY (SELECT NULL)' : '';
     const pagination = dialect === 'mssql'
         ? ` OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`
@@ -377,7 +386,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
             filters.values.forEach((value, index) => requestHandle.input(`p${index}`, value));
             const projection = groupedSqlProjection(plan, chart, 'mssql', join);
             const sort = plan.sort
-                ? ` ORDER BY ${quoteField(plan.sort.field, 'mssql')} ${plan.sort.direction.toUpperCase()}`
+                ? sqlSortClause(plan, chart, join, 'mssql')
                 : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'mssql', join) : ' ORDER BY (SELECT NULL)';
             const result = await requestHandle.query(`SELECT ${projection.select}${sqlFromClause(source, join, 'mssql')}${filters.where}${projection.groupBy}${sort} OFFSET ${(plan.page - 1) * plan.pageSize} ROWS FETCH NEXT ${plan.pageSize} ROWS ONLY`);
             return result.recordset.map(normalizePreview);
@@ -392,7 +401,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
             await client.connect();
             const filters = buildSqlFilters(plan, 'postgresql', join);
             const projection = groupedSqlProjection(plan, chart, 'postgresql', join);
-            const sort = plan.sort ? ` ORDER BY ${sqlQueryField(plan.sort.field, join, 'postgresql')} ${plan.sort.direction.toUpperCase()}` : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'postgresql', join) : '';
+            const sort = plan.sort ? sqlSortClause(plan, chart, join, 'postgresql') : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'postgresql', join) : '';
             const result = await client.query(`SELECT ${projection.select}${sqlFromClause(source, join, 'postgresql')}${filters.where}${projection.groupBy}${sort} LIMIT ${plan.pageSize} OFFSET ${(plan.page - 1) * plan.pageSize}`, filters.values);
             return result.rows.map(normalizePreview);
         } finally {
@@ -404,7 +413,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
     try {
         const filters = buildSqlFilters(plan, 'mysql', join);
         const projection = groupedSqlProjection(plan, chart, 'mysql', join);
-        const sort = plan.sort ? ` ORDER BY ${sqlQueryField(plan.sort.field, join, 'mysql')} ${plan.sort.direction.toUpperCase()}` : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'mysql', join) : '';
+        const sort = plan.sort ? sqlSortClause(plan, chart, join, 'mysql') : plan.groupBy.length ? defaultGroupedSort(plan.groupBy, 'mysql', join) : '';
         const [rows] = await connectionHandle.query(`SELECT ${projection.select}${sqlFromClause(source, join, 'mysql')}${filters.where}${projection.groupBy}${sort} LIMIT ? OFFSET ?`, [...filters.values, plan.pageSize, (plan.page - 1) * plan.pageSize]);
         const records = rows as Array<Record<string, unknown>>;
         return records.map(normalizePreview);
