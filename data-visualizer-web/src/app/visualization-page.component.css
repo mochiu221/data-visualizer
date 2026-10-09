@@ -37,6 +37,12 @@
 .auto-refresh-control select:focus-visible { outline: 2px solid #73b58e; outline-offset: 2px; }
 .visual-frame { position: relative; }
 .plot-refresh { position: absolute; right: 8px; top: 6px; z-index: 2; }
+.chart-type-switch { align-items: center; background: #f5faf6; border: 1px solid #dce9df; border-radius: 10px; display: inline-flex; flex-wrap: wrap; gap: 5px; margin: -8px 10px 16px 0; padding: 6px; position: relative; z-index: 2; }
+.chart-type-switch > span { color: #6b7b70; font: 700 9px Arial, sans-serif; letter-spacing: .12em; padding: 0 5px; }
+.chart-type-switch button { background: transparent; border: 1px solid transparent; border-radius: 7px; color: #557064; cursor: pointer; font: 600 11px Arial, sans-serif; min-height: 30px; padding: 6px 10px; }
+.chart-type-switch button:hover { background: #eaf3ec; color: #2b805d; }
+.chart-type-switch button.active { background: #2b805d; border-color: #2b805d; color: #fff; }
+.chart-type-switch button:focus-visible { outline: 2px solid #73b58e; outline-offset: 2px; }
 .plot-selector { align-items: center; background: #f5faf6; border: 1px solid #dce9df; border-radius: 10px; display: inline-flex; flex-wrap: wrap; gap: 9px; margin: -8px 0 16px; padding: 8px 10px 8px 11px; position: relative; z-index: 2; }
 .plot-selector-label { align-self: center; color: #6b7b70; font: 700 10px Arial, sans-serif; letter-spacing: .12em; }
 .plot-options { display: flex; flex-wrap: wrap; gap: 6px; }

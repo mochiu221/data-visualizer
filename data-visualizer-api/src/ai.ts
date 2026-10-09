@@ -76,7 +76,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '- Use line for a time series or trend where a date, timestamp, month, week, or year is the primary dimension.',
         '- Use bar for comparing values across categorical groups, ranking items, or showing multiple measures.',
         '- When the request groups by two categorical fields, use a bar chart: put the main category in queryPlan.groupBy[0] and chart.xAxis.field, put the comparison category in queryPlan.groupBy[1], and let the frontend render grouped bars for the second category.',
-        '- Use donut only for a part-to-whole breakdown with a small number of categories (preferably 2 to 6); use bar when there are many categories or precise comparison matters.',
+        '- Choose donut only when the user explicitly requests a pie or donut chart. When category count is unknown, prefer bar; the frontend may display a donut when a single grouped dimension has 2 to 6 categories.',
         '- Use table when the request needs row-level detail, several dimensions, several measures, or when no chart communicates the result clearly.',
         '- Do not choose a chart type solely because it is available; match the type to the query result shape and the user request.',
         '',
