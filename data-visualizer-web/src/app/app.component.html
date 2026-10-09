@@ -221,7 +221,6 @@
                 <div>
                   <span class="eyebrow">OPTIONAL JOIN</span>
                   <strong class="join-title">Bring a second table into view</strong>
-                  <p class="join-copy">Prism will use AI to choose the matching columns and join type.</p>
                 </div>
                 <span class="join-badge">SQL</span>
               </div>
@@ -304,7 +303,7 @@
                     query.
                   </p>
                   <p class="draft-note" *ngIf="preview.join as join">
-                    AI-selected {{ join.type }} join:
+                    LEFT JOIN:
                     {{ preview.source }}.{{ join.leftField }} =
                     {{ join.source }}.{{ join.rightField }}
                   </p>

@@ -95,14 +95,14 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         }
         if (requestedJoin) {
             try {
-                const aiJoin = !requestedJoin.leftField || !requestedJoin.rightField || !requestedJoin.type
+                const aiJoin = !requestedJoin.leftField || !requestedJoin.rightField
                     ? await generateJoinFields(parsed.data.request, primarySchema, joinedSchema)
                     : undefined;
                 join = {
                     source: requestedJoin.source,
                     leftField: requestedJoin.leftField ?? aiJoin?.leftField ?? '',
                     rightField: requestedJoin.rightField ?? aiJoin?.rightField ?? '',
-                    type: requestedJoin.type ?? aiJoin?.type ?? 'inner'
+                    type: 'left'
                 };
                 if (!primarySchema.some((column) => column.name === join?.leftField) || !joinedSchema.some((column) => column.name === join?.rightField)) {
                     throw new Error('The selected join fields are not present in their respective tables.');

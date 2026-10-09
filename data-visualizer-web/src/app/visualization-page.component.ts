@@ -52,6 +52,7 @@ interface Visualization {
   queryPlan?: { select: Array<{ field: string; label?: string }>; groupBy: string[]; page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
 }
 type FilterValue = string | number | boolean | null;
+type RefreshInterval = 0 | 30_000 | 60_000 | 300_000;
 
 @Component({
   standalone: true,
@@ -69,12 +70,14 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   filterValues: Record<string, FilterValue> = {};
   selectedField = '';
   selectedFields: string[] = [];
+  refreshInterval: RefreshInterval = 0;
   tableCanScrollLeft = false;
   tableCanScrollRight = false;
   private tableDragStartX = 0;
   private tableDragStartScrollLeft = 0;
   private tableDragElement?: HTMLElement;
   private tableDragging = false;
+  private refreshTimer?: ReturnType<typeof setInterval>;
   private lineCanvas?: ElementRef<HTMLCanvasElement>;
   private lineChart?: Chart<'line', (number | { x: string; y: number })[], string>;
   private barCanvas?: ElementRef<HTMLCanvasElement>;
@@ -111,7 +114,23 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     });
   }
 
-  ngOnDestroy(): void { this.lineChart?.destroy(); this.barChart?.destroy(); this.donutChart?.destroy(); }
+  ngOnDestroy(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.lineChart?.destroy();
+    this.barChart?.destroy();
+    this.donutChart?.destroy();
+  }
+
+  setRefreshInterval(interval: RefreshInterval): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+    this.refreshInterval = interval;
+    if (interval === 0) return;
+    this.refreshTimer = setInterval(() => {
+      if (this.loading || !this.visualization) return;
+      this.applyFilters(this.visualization.pagination?.page ?? 1);
+    }, interval);
+  }
 
   loadVisualization(id: string | null): void {
     this.visualization = undefined;

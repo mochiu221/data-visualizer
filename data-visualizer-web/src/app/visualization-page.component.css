@@ -32,6 +32,9 @@
 .filter-range { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; grid-column: span 2; padding: 12px; border: 1px solid #dce9df; border-radius: 6px; background: #f7fbf7; }.filter-range label { min-width: 0; }
 @media (max-width: 650px) { .detail-page { padding: 28px 20px 56px; }.back-link { margin-bottom: 34px; }.detail-head { align-items: start; flex-direction: column; gap: 18px; }.detail-head h1 { font-size: 38px; }.detail-head .refresh { align-self: stretch; }.query-card { padding: 17px; }.query-text { font-size: 16px; }.filters { padding: 17px; gap: 18px; }.filter-heading { align-items: start; flex-direction: column; gap: 10px; }.filter-count { align-self: flex-start; }.filter-grid { grid-template-columns: 1fr; margin-top: 15px; }.filter-actions { width: 100%; }.filter-actions button { flex: 1; }.visual-frame { min-height: 320px; padding: 35px 16px 24px; overflow-x: auto; }.bars { min-width: 430px; height: 245px; } }
 .filter-heading-actions .icon-refresh { display: none; }
+.auto-refresh-control { align-items: center; color: #65736a; display: flex; flex: none; font: 600 12px Arial, sans-serif; gap: 9px; }
+.auto-refresh-control select { background: #ffffff; border: 1px solid #d6e1d9; border-radius: 6px; color: #17211b; font: 12px Arial, sans-serif; min-height: 36px; padding: 0 10px; }
+.auto-refresh-control select:focus-visible { outline: 2px solid #73b58e; outline-offset: 2px; }
 .visual-frame { position: relative; }
 .plot-refresh { position: absolute; right: 8px; top: 6px; z-index: 2; }
 .plot-selector { align-items: center; background: #f5faf6; border: 1px solid #dce9df; border-radius: 10px; display: inline-flex; flex-wrap: wrap; gap: 9px; margin: -8px 0 16px; padding: 8px 10px 8px 11px; position: relative; z-index: 2; }
@@ -46,3 +49,4 @@
 .plot-clear:focus-visible { outline: 2px solid #c65d4c; outline-offset: 2px; }
 .sr-only { height: 1px; margin: -1px; overflow: hidden; position: absolute; width: 1px; clip: rect(0, 0, 0, 0); }
 @media (max-width: 650px) { .plot-selector { align-items: flex-start; flex-direction: column; margin-top: -4px; max-width: calc(100% - 42px); }.plot-selector-label { align-self: flex-start; }.plot-options { width: 100%; }.plot-option { flex: 1 1 auto; } }
+@media (max-width: 650px) { .detail-head { align-items: flex-start; flex-direction: column; gap: 16px; }.auto-refresh-control { align-self: flex-end; } }

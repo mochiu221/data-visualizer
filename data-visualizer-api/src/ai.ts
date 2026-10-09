@@ -5,7 +5,7 @@ import type { JoinDefinition, SchemaColumn } from './models.js';
 
 type SampleRow = Record<string, string | number>;
 
-export async function generateJoinFields(request: string, primarySchema: SchemaColumn[], joinedSchema: SchemaColumn[]): Promise<Pick<JoinDefinition, 'leftField' | 'rightField' | 'type'>> {
+export async function generateJoinFields(request: string, primarySchema: SchemaColumn[], joinedSchema: SchemaColumn[]): Promise<Pick<JoinDefinition, 'leftField' | 'rightField'>> {
     const isDeepSeek = aiProvider === 'deepseek';
     const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
@@ -13,9 +13,8 @@ export async function generateJoinFields(request: string, primarySchema: SchemaC
     const model = process.env.AI_MODEL ?? (isDeepSeek ? 'deepseek-chat' : 'gpt-4o-mini');
     const prompt = [
         'Choose the best pair of columns to join two database tables for the user request.',
-        'Return JSON only in this exact shape: {"leftField":"column from the first schema","rightField":"column from the second schema","type":"inner"|"left"}.',
+        'Return JSON only in this exact shape: {"leftField":"column from the first schema","rightField":"column from the second schema"}.',
         'Choose fields that represent the same entity or relationship. Prefer matching key/ID columns with compatible types and meanings.',
-        'Choose "left" when the user wants to keep all rows from the first table even without a match in the second table. Otherwise choose "inner" when the request focuses on records with matching data in both tables.',
         'Use only exact column names from the provided schemas. If there is no reasonable match, return empty strings for both fields.',
         `User request: ${request}`,
         `First table schema: ${JSON.stringify(primarySchema)}`,
@@ -37,7 +36,7 @@ export async function generateJoinFields(request: string, primarySchema: SchemaC
     } catch {
         throw new Error('AI provider returned invalid JSON for join-column selection.');
     }
-    const parsed = z.object({ leftField: z.string().max(80), rightField: z.string().max(80), type: z.enum(['inner', 'left']) }).safeParse(parsedJson);
+    const parsed = z.object({ leftField: z.string().max(80), rightField: z.string().max(80) }).safeParse(parsedJson);
     if (!parsed.success) throw new Error('AI provider returned an invalid join-column selection.');
     if (!parsed.data.leftField || !parsed.data.rightField) throw new Error('AI could not find a suitable pair of columns to join these tables.');
     if (!primarySchema.some((column) => column.name === parsed.data.leftField) || !joinedSchema.some((column) => column.name === parsed.data.rightField)) {
@@ -54,6 +53,8 @@ export function parseModelJson(content: string): z.infer<typeof generatedDefinit
 }
 
 export async function generateDefinition(input: z.infer<typeof visualizationInput>, schema: SchemaColumn[], sampleRows: SampleRow[] = []): Promise<z.infer<typeof generatedDefinition>> {
+    console.log('Schema:', schema);
+    console.log('Sample Rows:', sampleRows.slice(0, 5));
     const isDeepSeek = aiProvider === 'deepseek';
     const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
