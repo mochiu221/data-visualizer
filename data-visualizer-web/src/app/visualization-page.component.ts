@@ -477,6 +477,22 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (typeof value !== 'string') return String(value);
     try { const parsed = JSON.parse(value); return typeof parsed === 'string' ? parsed : value; } catch { return value.replace(/^"|"$/g, ''); }
   }
+  tableCellValue(value: string | number): string {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.test(value)) return this.displayValue(value);
+    const date = new Date(value.replace(' ', 'T'));
+    if (Number.isNaN(date.getTime())) return value;
+    const hasSeconds = /[T ]\d{2}:\d{2}:\d{2}/.test(value);
+    const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      ...(hasTimeZone ? { timeZone: 'UTC' } : {}),
+      ...(hasSeconds ? { second: '2-digit' as const } : {})
+    }).format(date);
+  }
   chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; const label = this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); return label.trim() ? label : 'NULL'; }
   chartTimeValue(item: Record<string, string | number>): string { return this.chartLabel(item).replace(/Z$/, ''); }
   keys(): string[] {
