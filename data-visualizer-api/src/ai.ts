@@ -1,9 +1,50 @@
 import { z } from 'zod';
 import { aiProvider } from './config.js';
 import { generatedDefinition, visualizationInput } from './models.js';
-import type { SchemaColumn } from './models.js';
+import type { JoinDefinition, SchemaColumn } from './models.js';
 
 type SampleRow = Record<string, string | number>;
+
+export async function generateJoinFields(request: string, primarySchema: SchemaColumn[], joinedSchema: SchemaColumn[]): Promise<Pick<JoinDefinition, 'leftField' | 'rightField' | 'type'>> {
+    const isDeepSeek = aiProvider === 'deepseek';
+    const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
+    const endpoint = isDeepSeek ? 'https://api.deepseek.com/chat/completions' : `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
+    const model = process.env.AI_MODEL ?? (isDeepSeek ? 'deepseek-chat' : 'gpt-4o-mini');
+    const prompt = [
+        'Choose the best pair of columns to join two database tables for the user request.',
+        'Return JSON only in this exact shape: {"leftField":"column from the first schema","rightField":"column from the second schema","type":"inner"|"left"}.',
+        'Choose fields that represent the same entity or relationship. Prefer matching key/ID columns with compatible types and meanings.',
+        'Choose "left" when the user wants to keep all rows from the first table even without a match in the second table. Otherwise choose "inner" when the request focuses on records with matching data in both tables.',
+        'Use only exact column names from the provided schemas. If there is no reasonable match, return empty strings for both fields.',
+        `User request: ${request}`,
+        `First table schema: ${JSON.stringify(primarySchema)}`,
+        `Second table schema: ${JSON.stringify(joinedSchema)}`
+    ].join('\n');
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, temperature: 0, messages: [{ role: 'system', content: 'You select safe, semantically appropriate database join columns and return strict JSON.' }, { role: 'user', content: prompt }] })
+    });
+    if (!response.ok) throw new Error(`AI provider join-selection request failed with status ${response.status}.`);
+    const responseBody = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = responseBody.choices?.[0]?.message?.content;
+    if (!content) throw new Error('AI provider returned no join-column selection.');
+    const json = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    let parsedJson: unknown;
+    try {
+        parsedJson = JSON.parse(json);
+    } catch {
+        throw new Error('AI provider returned invalid JSON for join-column selection.');
+    }
+    const parsed = z.object({ leftField: z.string().max(80), rightField: z.string().max(80), type: z.enum(['inner', 'left']) }).safeParse(parsedJson);
+    if (!parsed.success) throw new Error('AI provider returned an invalid join-column selection.');
+    if (!parsed.data.leftField || !parsed.data.rightField) throw new Error('AI could not find a suitable pair of columns to join these tables.');
+    if (!primarySchema.some((column) => column.name === parsed.data.leftField) || !joinedSchema.some((column) => column.name === parsed.data.rightField)) {
+        throw new Error('AI selected join columns that are not present in their respective table schemas.');
+    }
+    return parsed.data;
+}
 
 export function parseModelJson(content: string): z.infer<typeof generatedDefinition> {
     const json = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -40,6 +81,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '',
         'FIELDS, GROUPING, AND MEASURES:',
         '- Use queryPlan.select for the fields that should be returned. For row-level tables, include every requested detail field; use an empty array only when all source fields are needed.',
+        ...(input.join ? [`- The joined field joined.${input.join.rightField} duplicates the matched key ${input.join.leftField}; do not add both to queryPlan.select. If the join key is requested, select ${input.join.leftField} from the first table instead.`] : []),
         '- Use queryPlan.groupBy for categorical or time dimensions that must be grouped before counting; every groupBy field must exist in the schema.',
         '- When queryPlan.groupBy is non-empty, include every groupBy field in queryPlan.select so grouped dimensions are visible.',
         '- For two categorical groupBy fields, preserve the requested/main dimension first and the comparison dimension second; do not put the second category in chart.yAxes because it is a bar-series category, not a numeric measure.',
@@ -82,6 +124,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '- Do not include a field in both queryPlan.filters and filterControls. A field must be either an AI-fixed filter or a user-controlled filter.',
         '',
         'LABELS AND SAFETY:',
+        '- For fields from a joined table, do not prefix the human-readable label with "joined" or "joined."; use the column name naturally.',
         '- Make every filterControl.label a concise, human-readable label based on both the field and operator, not just the raw field name. Use labels such as "Name contains", "Created after", "Created before", "Status equals", or "Amount at least"; distinguish labels when the same field has multiple operators.',
         '- Convert field names to readable words and title case where appropriate, while preserving meaningful acronyms. Do not use labels such as "Filter", "Value", or the field name alone.'
     ].join('\n');

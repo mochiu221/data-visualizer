@@ -22,11 +22,19 @@ export const connectionUpdate = connectionFields.extend({ password: z.string().m
 });
 
 export const joinSchema = z.object({ source: z.string().min(1).max(120), leftField: z.string().min(1).max(80), rightField: z.string().min(1).max(80), type: z.enum(['inner', 'left']).default('inner') });
+const joinInputSchema = z.object({
+    source: z.string().min(1).max(120),
+    leftField: z.string().min(1).max(80).optional(),
+    rightField: z.string().min(1).max(80).optional(),
+    type: z.enum(['inner', 'left']).optional()
+}).superRefine((join, context) => {
+    if (Boolean(join.leftField) !== Boolean(join.rightField)) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide both join fields or let AI choose both.' });
+});
 export const visualizationInput = z.object({
     title: z.string().min(1).max(120),
     connectionId: z.string(),
     source: z.string().min(1).max(120),
-    join: joinSchema.optional(),
+    join: joinInputSchema.optional(),
     request: z.string().min(1).max(500),
     type: z.enum(['bar', 'line', 'donut', 'table']).optional()
 });
@@ -65,7 +73,7 @@ export const chartDefinitionSchema = z.object({
 
 export type ChartDefinition = z.infer<typeof chartDefinitionSchema>;
 
-export type Visualization = z.infer<typeof visualizationInput> & { id: string; createdAt: string; updatedAt: string; schema: SchemaColumn[]; queryPlan: QueryPlan; filterControls: FilterControl[]; selectMode: SelectMode; defaultSelects: string[]; chart?: ChartDefinition };
+export type Visualization = Omit<z.infer<typeof visualizationInput>, 'join'> & { join?: JoinDefinition; id: string; createdAt: string; updatedAt: string; schema: SchemaColumn[]; queryPlan: QueryPlan; filterControls: FilterControl[]; selectMode: SelectMode; defaultSelects: string[]; chart?: ChartDefinition };
 
 export const selectFieldSchema = z.object({
     field: z.string().min(1).max(80),

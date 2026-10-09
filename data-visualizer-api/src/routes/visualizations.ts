@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { aiProvider, metadataDb } from '../config.js';
-import { connections, generatedDefinition, visualizationInput, visualizations, type Connection, type SchemaColumn, type Visualization } from '../models.js';
-import { generateDefinition } from '../ai.js';
+import { connections, generatedDefinition, visualizationInput, visualizations, type Connection, type JoinDefinition, type SchemaColumn, type Visualization } from '../models.js';
+import { generateDefinition, generateJoinFields } from '../ai.js';
 import { applyFilterValues } from '../filters.js';
 import { buildPreviewParameters, buildPreviewQuery, countPreview, discoverSchema, listDistinctValues, queryPreview } from '../database.js';
 
@@ -79,27 +79,69 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const connection = connections.find((item) => item.id === parsed.data.connectionId);
         if (!connection) return reply.code(404).send({ message: 'Select a saved database connection before generating a visualization.' });
         if (parsed.data.join && connection.type === 'mongodb') return reply.code(400).send({ message: 'Joining collections is not supported for MongoDB.' });
-        const join = parsed.data.join;
+        const requestedJoin = parsed.data.join;
+        let join: JoinDefinition | undefined;
         let schema: SchemaColumn[];
         let sampleRows: Array<Record<string, string | number>>;
+        let primarySchema: SchemaColumn[];
+        let joinedSchema: SchemaColumn[];
         try {
-            const primarySchema = await discoverSchema(connection, parsed.data.source);
-            const joinedSchema = join ? await discoverSchema(connection, join.source) : [];
-            if (join && (!primarySchema.some((column) => column.name === join.leftField) || !joinedSchema.some((column) => column.name === join.rightField))) throw new Error('The selected join fields are not present in their respective tables.');
-            schema = [...primarySchema, ...(join ? joinedSchema.map((column) => ({ ...column, name: `joined.${column.name}` })) : [])];
+            primarySchema = await discoverSchema(connection, parsed.data.source);
+            joinedSchema = requestedJoin ? await discoverSchema(connection, requestedJoin.source) : [];
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Schema discovery failed.';
+            app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery or sample-row query failed');
+            return reply.code(502).send({ message });
+        }
+        if (requestedJoin) {
+            try {
+                const aiJoin = !requestedJoin.leftField || !requestedJoin.rightField || !requestedJoin.type
+                    ? await generateJoinFields(parsed.data.request, primarySchema, joinedSchema)
+                    : undefined;
+                join = {
+                    source: requestedJoin.source,
+                    leftField: requestedJoin.leftField ?? aiJoin?.leftField ?? '',
+                    rightField: requestedJoin.rightField ?? aiJoin?.rightField ?? '',
+                    type: requestedJoin.type ?? aiJoin?.type ?? 'inner'
+                };
+                if (!primarySchema.some((column) => column.name === join?.leftField) || !joinedSchema.some((column) => column.name === join?.rightField)) {
+                    throw new Error('The selected join fields are not present in their respective tables.');
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Join-column selection failed.';
+                app.log.error({ error: message, provider: aiProvider, connectionId: connection.id, source: parsed.data.source, joinedSource: requestedJoin.source }, 'Join-column selection failed');
+                return reply.code(message.includes('required') ? 503 : 502).send({ message });
+            }
+        }
+        schema = [...primarySchema, ...(join ? joinedSchema.map((column) => ({ ...column, name: `joined.${column.name}` })) : [])];
+        try {
             sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 }, undefined, join);
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Schema discovery or sample-row query failed.';
-            app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Schema discovery or sample-row query failed');
+            const message = error instanceof Error ? error.message : 'Sample-row query failed.';
+            app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Sample-row query failed');
             return reply.code(502).send({ message });
         }
         let definition: z.infer<typeof generatedDefinition>;
         try {
-            definition = await generateDefinition(parsed.data, schema, sampleRows);
+            definition = await generateDefinition({ ...parsed.data, join }, schema, sampleRows);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'AI visualization definition failed.';
             app.log.error({ error: message, provider: aiProvider }, 'AI visualization definition failed');
             return reply.code(message.includes('required') ? 503 : 502).send({ message });
+        }
+        if (join) {
+            const repeatedJoinField = `joined.${join.rightField}`;
+            const selectedJoinKey = definition.queryPlan.select.some((selection) => selection.field === repeatedJoinField);
+            if (selectedJoinKey) {
+                const select = definition.queryPlan.select.map((selection) => selection.field === repeatedJoinField
+                    ? { ...selection, field: join.leftField }
+                    : selection).filter((selection, index, selections) => selections.findIndex((item) => item.field === selection.field) === index);
+                definition = {
+                    ...definition,
+                    queryPlan: { ...definition.queryPlan, select },
+                    defaultSelects: [...new Set(definition.defaultSelects.map((field) => field === repeatedJoinField ? join.leftField : field))]
+                };
+            }
         }
         const schemaFields = new Set(schema.map((column) => column.name));
         const controlFields = new Set(definition.filterControls.map((control) => control.field));
@@ -144,7 +186,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const now = new Date().toISOString();
         const queryPlan = definition.type === 'table' ? { ...definition.queryPlan, pageSize: 20 } : definition.type === 'bar' ? { ...definition.queryPlan, pageSize: 1000 } : definition.queryPlan;
         definition = { ...definition, queryPlan };
-        const visualization: Visualization = { ...parsed.data, type: definition.type, title: definition.title, id: crypto.randomUUID(), createdAt: now, updatedAt: now, schema, queryPlan, filterControls: definition.filterControls, selectMode: definition.selectMode, defaultSelects: definition.defaultSelects, chart: definition.chart };
+        const visualization: Visualization = { ...parsed.data, join, type: definition.type, title: definition.title, id: crypto.randomUUID(), createdAt: now, updatedAt: now, schema, queryPlan, filterControls: definition.filterControls, selectMode: definition.selectMode, defaultSelects: definition.defaultSelects, chart: definition.chart };
         const draftId = crypto.randomUUID();
         drafts.set(draftId, visualization);
         return reply.send({

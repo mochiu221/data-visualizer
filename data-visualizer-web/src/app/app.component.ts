@@ -59,9 +59,6 @@ export class AppComponent implements OnInit {
   isLoadingSchema = false;
   query = { connectionId: '', source: '', request: '' };
   joinSource = '';
-  joinType: JoinDefinition['type'] = 'inner';
-  joinLeftField = '';
-  joinRightField = '';
   newConnection = { name: '', type: 'mssql' as DatabaseType, host: '', port: 1433, database: '', username: '', password: '', tls: false };
   readonly todayLabel = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date()).toUpperCase();
   get isDetailPage(): boolean { return this.router.url.startsWith('/visualizations/'); }
@@ -96,17 +93,15 @@ export class AppComponent implements OnInit {
     });
   }
   loadJoinSchema(): void {
-    if (!this.query.connectionId || !this.joinSource.trim()) { this.joinSchemaColumns = []; this.joinLeftField = ''; this.joinRightField = ''; return; }
+    if (!this.query.connectionId || !this.joinSource.trim()) { this.joinSchemaColumns = []; return; }
     this.http.get<{ columns: Array<{ name: string; type: string }> }>(`${this.apiUrl}/schema/${this.query.connectionId}?source=${encodeURIComponent(this.joinSource.trim())}`).subscribe({
-      next: (result) => { this.joinSchemaColumns = result.columns; this.joinLeftField = ''; this.joinRightField = ''; },
+      next: (result) => { this.joinSchemaColumns = result.columns; },
       error: (response) => { this.joinSchemaColumns = []; this.notice = response.error?.message ?? 'Could not read the joined source schema.'; }
     });
   }
   selectConnection(): void {
     this.query.source = '';
     this.joinSource = '';
-    this.joinLeftField = '';
-    this.joinRightField = '';
     this.tables = [];
     this.schemaColumns = [];
     this.joinSchemaColumns = [];
@@ -174,8 +169,7 @@ export class AppComponent implements OnInit {
     if (!this.query.connectionId) { this.notice = 'Select a saved database connection first.'; return; }
     if (!this.query.source.trim()) { this.notice = 'Select a table or collection before creating a visualization.'; return; }
     if (!this.query.request.trim()) { this.notice = 'Describe what you want to see before creating a visualization.'; return; }
-    const join = this.joinSource.trim() ? { source: this.joinSource.trim(), leftField: this.joinLeftField, rightField: this.joinRightField, type: this.joinType } : undefined;
-    if (join && (!join.leftField || !join.rightField)) { this.notice = 'Choose both fields for the table join.'; return; }
+    const join = this.joinSource.trim() ? { source: this.joinSource.trim() } : undefined;
     this.isGenerating = true;
     this.http.post<VisualizationDraftResponse>(`${this.apiUrl}/visualizations/generate`, { ...this.query, ...(join ? { join } : {}), title: this.query.request }).subscribe({ next: (draft) => { this.pendingDraftId = draft.draftId; this.pendingDefinition = draft.definition; this.pendingVisualization = draft.visualization; this.isGenerating = false; this.notice = 'Review the generated definition before saving it.'; }, error: (response) => { this.isGenerating = false; this.notice = response.error?.message ?? 'The visualization definition could not be generated.'; } });
   }

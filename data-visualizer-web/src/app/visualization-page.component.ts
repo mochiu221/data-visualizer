@@ -140,13 +140,23 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   }
 
   selectableFields(): string[] {
+    if (this.visualization?.type === 'table') {
+      return this.availableTableFields();
+    }
     const xAxisField = this.visualization?.chart?.xAxis.field;
     return this.visualization?.queryPlan?.select.map((selection) => selection.field).filter((field) => field !== xAxisField) ?? [];
   }
 
-  fieldLabel(field: string): string {
+  private availableTableFields(item = this.visualization): string[] {
+    if (!item) return [];
+    const returnedFields = item.data[0] ? Object.keys(item.data[0]) : [];
+    return returnedFields.length ? returnedFields : item.queryPlan?.select.map((selection) => selection.field) ?? [];
+  }
+
+  fieldLabel(field: string, label?: string): string {
     const selection = this.visualization?.queryPlan?.select.find((item) => item.field === field);
-    return selection?.label || field.replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+    const value = label || selection?.label || field.replace(/^joined\./i, '').replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
+    return field.startsWith('joined.') ? value.replace(/^joined(?:[.\s]+)+/i, '') : value;
   }
 
   onDisplaySelectionChange(): void {
@@ -259,7 +269,9 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   }
 
   private initializeDisplaySelection(item: Visualization): void {
-    const fields = item.queryPlan?.select.map((selection) => selection.field).filter((field) => field !== item.chart?.xAxis.field) ?? [];
+    const fields = item.type === 'table'
+      ? this.availableTableFields(item)
+      : item.queryPlan?.select.map((selection) => selection.field).filter((field) => field !== item.chart?.xAxis.field) ?? [];
     const defaults = (item.defaultSelects ?? []).filter((field) => fields.includes(field));
     if (item.selectMode === 'multiple') {
       this.selectedFields = defaults.length ? defaults : fields;
@@ -272,8 +284,11 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   displayFields(): string[] {
     const selected = this.visualization?.selectMode === 'multiple' ? this.selectedFields : this.selectedField ? [this.selectedField] : [];
-    const xAxisField = this.visualization?.chart?.xAxis.field;
-    return this.visualization?.type === 'table' && xAxisField ? [xAxisField, ...selected.filter((field) => field !== xAxisField)] : selected;
+    if (this.visualization?.type === 'table') {
+      const fields = new Set(this.availableTableFields());
+      return selected.filter((field) => fields.has(field));
+    }
+    return selected;
   }
 
   private renderDonutChart(): void {
@@ -335,7 +350,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     const labels = seriesField ? groupedLabels : this.visualization.data.map((item) => this.chartLabel(item));
     const datasets = seriesField
       ? seriesLabels.map((series) => ({ label: series, data: groupedLabels.map((label) => { const row = this.visualization!.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series); return Math.max(this.chartValue(row ?? {}, measureField), 0); }), backgroundColor: colorForSeries(series), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: groupedLabels.length > 12 ? 42 : 78 }))
-      : [{ label: this.visualization.chart?.yAxis.label ?? 'Value', data: values, backgroundColor: values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e'), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: values.length > 12 ? 42 : 78 }];
+      : [{ label: this.visualization.chart ? this.fieldLabel(this.visualization.chart.yAxis.field, this.visualization.chart.yAxis.label) : 'Value', data: values, backgroundColor: values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e'), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: values.length > 12 ? 42 : 78 }];
     this.barChart = new Chart<'bar', number[], string>(this.barCanvas.nativeElement, {
       type: 'bar',
       data: {
@@ -348,11 +363,11 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         maintainAspectRatio: false,
         plugins: { legend: { display: Boolean(seriesField), labels: { color: '#718078', usePointStyle: true } }, tooltip: { displayColors: Boolean(seriesField), padding: 10 } },
         scales: isHorizontal ? {
-          x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
+          x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart ? this.fieldLabel(this.visualization.chart.yAxis.field, this.visualization.chart.yAxis.label) : 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
           y: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, padding: 8 } }
         } : {
           x: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, maxRotation: 60, minRotation: 45, padding: 8 } },
-          y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
+          y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: this.visualization.chart ? this.fieldLabel(this.visualization.chart.yAxis.field, this.visualization.chart.yAxis.label) : 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
         }
       }
     });
@@ -386,7 +401,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         datasets: seriesFields.map((field) => {
           const color = colorForField(field);
           return {
-            label: chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === yAxisField ? chart?.yAxis.label ?? field : field),
+            label: this.fieldLabel(field, chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === yAxisField ? chart?.yAxis.label : undefined)),
             data: isTimeScale
               ? this.visualization!.data.map((item) => ({ x: this.chartTimeValue(item), y: Number(item[field] ?? 0) }))
               : this.visualization!.data.map((item) => Number(item[field] ?? 0)),
@@ -414,7 +429,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         scales: {
           x: {
             type: this.visualization.chart?.xAxis.scale === 'time' ? 'time' : 'category',
-            title: { display: true, text: this.visualization.chart?.xAxis.label ?? 'X axis', color: '#718078', font: { size: 11, weight: 600 } },
+            title: { display: true, text: chart ? this.fieldLabel(chart.xAxis.field, chart.xAxis.label) : 'X axis', color: '#718078', font: { size: 11, weight: 600 } },
             grid: { display: false },
             border: { display: false },
             time: { unit: this.visualization.chart?.xAxis.timeUnit ?? 'day' },
@@ -422,7 +437,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
           },
           y: {
             beginAtZero: true,
-            title: { display: true, text: this.visualization.chart?.yAxis.label ?? 'Value', color: '#718078', font: { size: 11, weight: 600 } },
+            title: { display: true, text: chart ? this.fieldLabel(chart.yAxis.field, chart.yAxis.label) : 'Value', color: '#718078', font: { size: 11, weight: 600 } },
             grid: { color: '#e8efeb' },
             border: { display: false },
             ticks: { color: '#718078', padding: 8, precision: 0 }
@@ -446,8 +461,12 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   chartLabel(item: Record<string, string | number>): string { const field = this.visualization?.chart?.xAxis.field; const label = this.displayValue(field ? item[field] ?? '' : Object.values(item).find((value) => typeof value === 'string') ?? ''); return label.trim() ? label : 'NULL'; }
   chartTimeValue(item: Record<string, string | number>): string { return this.chartLabel(item).replace(/Z$/, ''); }
   keys(): string[] {
-    const fields = this.displayFields();
     const returnedFields = this.visualization?.data[0] ? Object.keys(this.visualization.data[0]) : [];
+    if (this.visualization?.type === 'table') {
+      const selectedFields = new Set(this.displayFields());
+      return this.availableTableFields().filter((field) => returnedFields.includes(field) && selectedFields.has(field));
+    }
+    const fields = this.displayFields();
     return [...fields.filter((field) => returnedFields.includes(field)), ...returnedFields.filter((field) => !fields.includes(field))];
   }
   sortSummary(): string { const sort = this.visualization?.queryPlan?.sort; return sort ? `${sort.field} ${sort.direction}` : 'Default order'; }
