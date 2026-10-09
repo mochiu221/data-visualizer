@@ -296,23 +296,49 @@
               ><ng-container
                 *ngIf="pendingVisualization as preview; else emptyPreview"
                 ><div class="draft-preview">
-                  <h3>{{ preview.title }}</h3>
+                  <div class="draft-heading">
+                    <div>
+                      <span class="eyebrow">GENERATED VISUALIZATION</span>
+                      <h3>{{ preview.title }}</h3>
+                    </div>
+                    <span class="draft-status"><span></span>Ready to review</span>
+                  </div>
                   <p class="draft-note">
                     Definition generated without executing the visualization
                     query.
                   </p>
-                  <p class="draft-note" *ngIf="preview.join as join">
-                    LEFT JOIN:
-                    {{ preview.source }}.{{ join.leftField }} =
-                    {{ join.source }}.{{ join.rightField }}
-                  </p>
-                  <span class="eyebrow">QUERY</span>
-                  <pre class="draft-query">{{ preview.query }}</pre>
+                  <div class="join-summary" *ngIf="preview.join as join">
+                    <span class="preview-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M8 7h8M8 17h8M6 4v4a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4"/><circle cx="6" cy="4" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>
+                    </span>
+                    <div>
+                      <strong>LEFT JOIN</strong>
+                      <span>
+                        {{ preview.source }}.{{ join.leftField }} =
+                        {{ join.source }}.{{ join.rightField }}
+                      </span>
+                    </div>
+                  </div>
+                  <section class="preview-section preview-query">
+                    <div class="preview-section-heading">
+                      <span class="preview-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4m8-8 4 4-4 4m-2-7-4 6"/></svg>
+                      </span>
+                      <div><span class="eyebrow">QUERY</span><small>Generated SQL</small></div>
+                      <span class="preview-tag">Read only</span>
+                    </div>
+                    <pre class="draft-query">{{ preview.query }}</pre>
+                  </section>
                   <div
-                    class="draft-params"
+                    class="draft-params preview-section"
                     *ngIf="preview.queryParameters.length"
                   >
-                    <span class="eyebrow">PARAMETERS</span>
+                    <div class="preview-section-heading">
+                      <span class="preview-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M8 5h12M8 12h12M8 19h12"/><circle cx="4" cy="5" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="19" r="1"/></svg>
+                      </span>
+                      <div><span class="eyebrow">PARAMETERS</span><small>Bound values</small></div>
+                    </div>
                     <div
                       *ngFor="
                         let value of preview.queryParameters;
@@ -323,76 +349,143 @@
                       ><span>{{ value | json }}</span>
                     </div>
                   </div>
-                  <ng-container *ngIf="pendingDefinition as definition"
-                    ><span class="eyebrow">QUERY PLAN</span>
-                    <div class="definition-grid">
-                      <div>
-                        <small>Group by</small
-                        ><strong>{{
-                          definition.queryPlan.groupBy.length
-                            ? definition.queryPlan.groupBy.join(", ")
-                            : "None"
-                        }}</strong>
+                  <ng-container *ngIf="pendingDefinition as definition">
+                    <section class="definition-section query-plan-section">
+                      <div class="preview-section-heading">
+                        <span class="preview-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+                        </span>
+                        <div><span class="eyebrow">QUERY PLAN</span><small>How the data is shaped</small></div>
                       </div>
-                      <div>
-                        <small>Sort</small
-                        ><strong>{{
-                          definition.queryPlan.sort
-                            ? definition.queryPlan.sort.field +
-                              " " +
-                              definition.queryPlan.sort.direction
-                            : "Default order"
-                        }}</strong>
+                      <div class="definition-grid">
+                        <div>
+                          <small>Fields</small
+                          ><strong>{{ selectSummary(definition) }}</strong>
+                        </div>
+                        <div>
+                          <small>Group by</small
+                          ><strong>{{
+                            definition.queryPlan.groupBy.length
+                              ? definition.queryPlan.groupBy.join(", ")
+                              : "None"
+                          }}</strong>
+                        </div>
+                        <div>
+                          <small>Sort</small
+                          ><strong>{{
+                            definition.queryPlan.sort
+                              ? definition.queryPlan.sort.field +
+                                " " +
+                                definition.queryPlan.sort.direction
+                              : "Default order"
+                          }}</strong>
+                        </div>
+                        <div>
+                          <small>Page size</small
+                          ><strong>{{ definition.queryPlan.pageSize }} rows</strong>
+                        </div>
                       </div>
-                      <div>
-                        <small>Page</small
-                        ><strong
-                          >{{ definition.queryPlan.page }} ·
-                          {{ definition.queryPlan.pageSize }} rows</strong
-                        >
+                    </section>
+                    <section class="definition-section fixed-filter-section">
+                      <div class="preview-section-heading">
+                        <span class="preview-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10m-7 6h4"/></svg>
+                        </span>
+                        <div><span class="eyebrow">FIXED FILTERS</span><small>Applied automatically</small></div>
                       </div>
-                    </div>
-                    <span class="eyebrow">FILTER CONTROLS</span>
-                    <div class="definition-list">
-                      <div *ngFor="let control of definition.filterControls">
-                        <strong>{{ control.label }}</strong
-                        ><span
-                          >{{ control.field }} · {{ control.operator
-                          }}<ng-container *ngIf="control.range">
-                            · {{ control.range }}</ng-container
-                          ></span
-                        >
+                      <div class="definition-list">
+                        <div *ngFor="let filter of definition.queryPlan.filters">
+                          <strong>{{ filter.field }} · {{ filter.operator }}</strong
+                          ><span>{{ filter.value | json }}</span>
+                        </div>
+                        <p *ngIf="!definition.queryPlan.filters.length">
+                          No fixed filters
+                        </p>
                       </div>
-                      <p *ngIf="!definition.filterControls.length">
-                        No filter controls
-                      </p>
-                    </div>
-                    <span class="eyebrow">CHART</span>
-                    <div class="definition-grid">
-                      <div>
-                        <small>Type</small
-                        ><strong>{{ definition.type }}</strong>
+                    </section>
+                    <section class="definition-section filter-control-section">
+                      <div class="preview-section-heading">
+                        <span class="preview-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h10m-10 7h16"/><circle cx="17" cy="12" r="2"/><circle cx="8" cy="5" r="2"/></svg>
+                        </span>
+                        <div><span class="eyebrow">FILTER CONTROLS</span><small>Available to viewers</small></div>
                       </div>
-                      <div>
-                        <small>Measure</small
-                        ><strong
-                          >{{ definition.chart.yAxis.label }} ·
-                          {{ definition.chart.yAxis.field }}</strong
-                        >
+                      <div class="definition-list">
+                        <div *ngFor="let control of definition.filterControls">
+                          <strong>{{ control.label }}</strong
+                          ><span
+                            >{{ control.field }} · {{ control.type }} ·
+                            {{ control.operator }}<ng-container *ngIf="control.range">
+                              · {{ control.range }}</ng-container
+                            ></span
+                          >
+                        </div>
+                        <p *ngIf="!definition.filterControls.length">
+                          No filter controls
+                        </p>
                       </div>
-                      <div>
-                        <small>Aggregation</small
-                        ><strong>{{ definition.chart.yAggregation }}</strong>
+                    </section>
+                    <section class="definition-section display-field-section">
+                      <div class="preview-section-heading">
+                        <span class="preview-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>
+                        </span>
+                        <div><span class="eyebrow">DISPLAY FIELDS</span><small>Initial viewer selection</small></div>
                       </div>
-                      <div>
-                        <small>Dimension</small
-                        ><strong
-                          >{{ definition.chart.xAxis.label }} ·
-                          {{ definition.chart.xAxis.field }}</strong
-                        >
+                      <div class="definition-grid">
+                        <div>
+                          <small>Selection</small
+                          ><strong>{{ displayFieldsSummary(definition) }}</strong>
+                        </div>
                       </div>
-                    </div></ng-container
-                  >
+                    </section>
+                    <section class="definition-section chart-section" *ngIf="definition.type !== 'table'; else tablePreviewSettings">
+                      <div class="preview-section-heading">
+                        <span class="preview-icon" aria-hidden="true">
+                          <svg viewBox="0 0 24 24"><path d="M4 19V5m0 14h17M8 16v-5m5 5V7m5 9v-8"/></svg>
+                        </span>
+                        <div><span class="eyebrow">CHART</span><small>Visualization settings</small></div>
+                      </div>
+                      <div class="definition-grid">
+                        <div>
+                          <small>Type</small
+                          ><strong>{{ definition.type }}</strong>
+                        </div>
+                        <div>
+                          <small>Measures</small
+                          ><strong>{{ measureSummary(definition) }}</strong>
+                        </div>
+                        <div>
+                          <small>Aggregation</small
+                          ><strong>{{ definition.chart.yAggregation }}</strong>
+                        </div>
+                        <div>
+                          <small>Dimension</small
+                          ><strong>{{ dimensionSummary(definition) }}</strong>
+                        </div>
+                      </div>
+                    </section>
+                    <ng-template #tablePreviewSettings>
+                      <section class="definition-section table-preview-section">
+                        <div class="preview-section-heading">
+                          <span class="preview-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 10h16M10 10v9"/></svg>
+                          </span>
+                          <div><span class="eyebrow">TABLE</span><small>Displayed row fields</small></div>
+                        </div>
+                        <div class="definition-grid">
+                          <div>
+                            <small>Columns</small
+                            ><strong>{{ selectSummary(definition) }}</strong>
+                          </div>
+                          <div>
+                            <small>Rows per page</small
+                            ><strong>{{ definition.queryPlan.pageSize }}</strong>
+                          </div>
+                        </div>
+                      </section>
+                    </ng-template>
+                  </ng-container>
                   <div class="draft-actions">
                     <button
                       class="secondary"

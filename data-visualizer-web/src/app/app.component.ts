@@ -12,9 +12,9 @@ interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface JoinDefinition { source: string; leftField: string; rightField: string; type: 'inner' | 'left'; }
 interface Visualization { id: string; title: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
-interface QueryPlanPreview { filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
-interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAggregation: string; }
-interface VisualizationDefinitionPreview { queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; title: string; type: ChartType; chart: ChartPreview; }
+interface QueryPlanPreview { select: Array<{ field: string; label?: string }>; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
+interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAxes?: Array<{ field: string; label: string; scale: string }>; yAggregation: string; }
+interface VisualizationDefinitionPreview { queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; selectMode: 'single' | 'multiple'; defaultSelects: string[]; title: string; type: ChartType; chart: ChartPreview; }
 interface VisualizationPreview extends Visualization { request: string; connectionId: string; query: string; queryParameters: Array<string | number | boolean>; queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; chart: ChartPreview; schema: unknown; }
 interface VisualizationDraftResponse { draftId: string; definition: VisualizationDefinitionPreview; visualization: VisualizationPreview; }
 
@@ -86,6 +86,24 @@ export class AppComponent implements OnInit {
     this._activeView = value;
   }
   get connectionTestPassed(): boolean { return this.testedConnectionFingerprint === JSON.stringify(this.newConnection); }
+  selectSummary(definition: VisualizationDefinitionPreview): string {
+    return definition.queryPlan.select.length
+      ? definition.queryPlan.select.map((selection) => selection.label || selection.field).join(', ')
+      : 'All source fields';
+  }
+  displayFieldsSummary(definition: VisualizationDefinitionPreview): string {
+    const defaults = definition.defaultSelects.length ? definition.defaultSelects.join(', ') : 'None';
+    return `${definition.selectMode === 'multiple' ? 'Multiple' : 'Single'} · initially showing ${defaults}`;
+  }
+  dimensionSummary(definition: VisualizationDefinitionPreview): string {
+    const axis = definition.chart.xAxis;
+    const timeUnit = axis.scale === 'time' && axis.timeUnit ? ` · ${axis.timeUnit}` : '';
+    return `${axis.label} · ${axis.field}${timeUnit}`;
+  }
+  measureSummary(definition: VisualizationDefinitionPreview): string {
+    const axes = definition.chart.yAxes?.length ? definition.chart.yAxes : [definition.chart.yAxis];
+    return axes.map((axis) => `${axis.label} · ${axis.field}`).join(', ');
+  }
 
   ngOnInit(): void { this.loadConnections(); this.loadVisualizations(); }
   loadConnections(): void { this.http.get<Connection[]>(`${this.apiUrl}/connections`).subscribe({ next: (items) => { this.connections = items; this.apiOnline = true; this.refreshConnectionStatuses(); }, error: () => { this.apiOnline = false; this.notice = 'API is offline. Start the Compose stack to connect live data.'; } }); }
