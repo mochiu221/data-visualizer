@@ -198,9 +198,14 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
         const field = sqlQueryField(filter.field, join, dialect);
         const index = values.push(filter.value) - 1;
         const parameter = dialect === 'mssql' ? `@p${index}` : dialect === 'postgresql' ? `$${index + 1}` : '?';
+        const comparisonParameter = dialect === 'mssql'
+            && typeof filter.value === 'string'
+            && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(filter.value)
+            ? `CONVERT(datetime2(7), REPLACE(${parameter}, 'Z', ''))`
+            : parameter;
         if (filter.operator === 'contains') return dialect === 'mssql' ? `${field} LIKE '%' + ${parameter} + '%'` : dialect === 'postgresql' ? `${field} ILIKE '%' || ${parameter} || '%'` : `${field} LIKE CONCAT('%', ${parameter}, '%')`;
         const operator = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' }[filter.operator];
-        return `${field} ${operator} ${parameter}`;
+        return `${field} ${operator} ${comparisonParameter}`;
     });
     return { values, where: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '' };
 }
