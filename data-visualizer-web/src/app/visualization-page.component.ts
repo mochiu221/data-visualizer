@@ -383,8 +383,8 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     const chart = this.visualization.chart;
     const xAxisField = chart?.xAxis.field;
     const selectedFields = new Set(this.displayFields());
-    const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && selectedFields.has(field) && typeof value === 'number').map(([field]) => field)))];
     const yAxisField = chart?.yAxis.field;
+    const numericFields = [...new Set(this.visualization.data.flatMap((item) => Object.entries(item).filter(([field, value]) => field !== xAxisField && (selectedFields.has(field) || (chart?.yAggregation === 'count' && field === yAxisField)) && typeof value === 'number').map(([field]) => field)))];
     const configuredFields = chart?.yAxes?.map((axis) => axis.field).filter((field) => numericFields.includes(field)) ?? [];
     const seriesFields = configuredFields.length
       ? [...configuredFields, ...numericFields.filter((field) => !configuredFields.includes(field))]
