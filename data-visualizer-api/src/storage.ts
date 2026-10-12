@@ -28,13 +28,10 @@ export async function initializeStorage(): Promise<void> {
         filter_controls JSONB NOT NULL,
         select_mode TEXT NOT NULL DEFAULT 'single',
         default_selects JSONB NOT NULL DEFAULT '[]'::jsonb,
+        chart_definition JSONB,
         created_at TIMESTAMPTZ NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
     )`);
-    await metadataDb.query('ALTER TABLE saved_visualizations ADD COLUMN IF NOT EXISTS chart_definition JSONB');
-    await metadataDb.query('ALTER TABLE saved_visualizations ADD COLUMN IF NOT EXISTS join_definition JSONB');
-    await metadataDb.query("ALTER TABLE saved_visualizations ADD COLUMN IF NOT EXISTS select_mode TEXT NOT NULL DEFAULT 'single'");
-    await metadataDb.query("ALTER TABLE saved_visualizations ADD COLUMN IF NOT EXISTS default_selects JSONB NOT NULL DEFAULT '[]'::jsonb");
     const result = await metadataDb.query('SELECT id, name, type, host, port, database_name, username, encrypted_password, tls, created_at FROM saved_connections ORDER BY created_at DESC');
     connections.push(...result.rows.map((row) => ({
         id: row.id,
