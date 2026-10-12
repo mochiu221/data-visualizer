@@ -115,7 +115,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         }
         schema = [...primarySchema, ...(join ? joinedSchema.map((column) => ({ ...column, name: `joined.${column.name}` })) : [])];
         try {
-            sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filters: [], groupBy: [], sort: null, page: 1, pageSize: 5 }, undefined, join);
+            sampleRows = await queryPreview(connection, parsed.data.source, { select: [], filterGroups: [], groupBy: [], sort: null, page: 1, pageSize: 5 }, undefined, join);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Sample-row query failed.';
             app.log.error({ error: message, connectionId: connection.id, source: parsed.data.source }, 'Sample-row query failed');
@@ -148,7 +148,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         const invalidFields = [
             ...definition.queryPlan.select.map((selection) => selection.field),
             ...definition.filterControls.map((control) => control.field),
-            ...definition.queryPlan.filters.map((filter) => filter.field),
+            ...definition.queryPlan.filterGroups.flatMap((group) => group.map((filter) => filter.field)),
             ...(definition.queryPlan.sort ? [definition.queryPlan.sort.field] : [])
             , ...definition.queryPlan.groupBy
             , definition.chart.xAxis.field,
@@ -157,7 +157,7 @@ export function registerVisualizationRoutes(app: FastifyInstance): void {
         if (invalidFields.length) {
             return reply.code(502).send({ message: `The AI returned a field that is not in the source schema: ${invalidFields[0]}` });
         }
-        const conflicts = definition.queryPlan.filters.filter((filter) => controlFields.has(filter.field)).map((filter) => filter.field);
+        const conflicts = definition.queryPlan.filterGroups.flat().filter((filter) => controlFields.has(filter.field)).map((filter) => filter.field);
         if (conflicts.length) {
             return reply.code(502).send({ message: `The AI returned a conflicting filter control for: ${conflicts[0]}` });
         }

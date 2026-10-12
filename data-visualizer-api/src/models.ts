@@ -81,14 +81,29 @@ export const selectFieldSchema = z.object({
 });
 export type SelectField = z.infer<typeof selectFieldSchema>;
 
+const queryFilterSchema = z.object({
+    field: z.string().min(1).max(80),
+    operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains']),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+    type: z.enum(['text', 'number', 'boolean', 'date', 'time', 'datetime']).optional()
+});
+
 export const queryPlanSchema = z.object({
     select: z.array(selectFieldSchema).max(50).default([]),
-    filters: z.array(z.object({ field: z.string().min(1).max(80), operator: z.enum(['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains']), value: z.union([z.string(), z.number(), z.boolean()]), type: z.enum(['text', 'number', 'boolean', 'date', 'time', 'datetime']).optional() })).max(10).default([]),
+    filters: z.array(queryFilterSchema).max(10).optional(),
+    filterGroups: z.array(z.array(queryFilterSchema).min(1).max(20)).max(10).default([]),
     groupBy: z.array(z.string().min(1).max(80)).max(5).default([]),
     sort: z.object({ field: z.string().min(1).max(80), direction: z.enum(['asc', 'desc']) }).nullable().default(null),
     page: z.number().int().min(1).default(1),
     pageSize: z.number().int().min(1).max(1000).default(20)
-});
+}).transform(({ filters, filterGroups, ...plan }) => ({
+    ...plan,
+    filterGroups: filters?.length
+        ? filterGroups.length
+            ? filterGroups.map((group) => [...filters, ...group])
+            : [filters]
+        : filterGroups
+}));
 
 export const generatedDefinition = z.object({
     queryPlan: queryPlanSchema,

@@ -394,11 +394,17 @@
                         <div><span class="eyebrow">FIXED FILTERS</span><small>Applied automatically</small></div>
                       </div>
                       <div class="definition-list">
-                        <div *ngFor="let filter of definition.queryPlan.filters">
-                          <strong>{{ filter.field }} · {{ filter.operator }}</strong
-                          ><span>{{ filter.value | json }}</span>
-                        </div>
-                        <p *ngIf="!definition.queryPlan.filters.length">
+                        <ng-container *ngFor="let group of definition.queryPlan.filterGroups; let groupIndex = index">
+                          <strong>Group {{ groupIndex + 1 }} · AND</strong>
+                          <div *ngFor="let filter of group">
+                            <strong>{{ filter.field }} · {{ filter.operator }}</strong
+                            ><span>{{ filter.value | json }}</span>
+                          </div>
+                        </ng-container>
+                        <p *ngIf="definition.queryPlan.filterGroups.length > 1">
+                          Groups are alternatives combined with OR.
+                        </p>
+                        <p *ngIf="!definition.queryPlan.filterGroups.length">
                           No fixed filters
                         </p>
                       </div>

@@ -26,7 +26,7 @@ export function normalizeTime(value: string): string {
     return `${match[1]}:${match[2]}:${match[3] ?? '00'}`;
 }
 
-export function temporalFilters(field: string, operator: QueryPlan['filters'][number]['operator'], value: string, type: 'date' | 'time' | 'datetime'): QueryPlan['filters'] {
+export function temporalFilters(field: string, operator: QueryPlan['filterGroups'][number][number]['operator'], value: string, type: 'date' | 'time' | 'datetime'): QueryPlan['filterGroups'][number] {
     if (type === 'time') {
         const normalized = normalizeTime(value);
         return [{ field, operator: operator === 'contains' ? 'eq' : operator, value: normalized, type }];
@@ -59,7 +59,10 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
     const controls = new Map(visualization.filterControls.map((control) => [controlKey(control), control]));
     for (const key of Object.keys(parsed.data)) if (!controls.has(key) && !visualization.filterControls.some((control) => control.field === key)) throw new Error(`Filter field is not available: ${key}`);
     const controlledFields = new Set(visualization.filterControls.map((control) => control.field));
-    const filters = visualization.queryPlan.filters.filter((filter) => !controlledFields.has(filter.field));
+    let filterGroups = visualization.queryPlan.filterGroups
+        .map((group) => group.filter((filter) => !controlledFields.has(filter.field)))
+        .filter((group) => group.length > 0);
+    const dynamicFilters: QueryPlan['filterGroups'][number] = [];
     for (const [key, value] of Object.entries(parsed.data)) {
         if (value === null || value === '') continue;
         const control = controls.get(key) ?? controls.get(`${key}::${visualization.filterControls.find((item) => item.field === key)?.operator}`)!;
@@ -71,10 +74,15 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
         if (control.type === 'date' || control.type === 'datetime' || control.type === 'time') {
             if (typeof value !== 'string') throw new Error(`Filter value for ${field} must be a date and time.`);
             if (control.type !== 'time' && Number.isNaN(Date.parse(value))) throw new Error(`Filter value for ${field} must be a valid date and time.`);
-            filters.push(...temporalFilters(field, control.operator, value, control.type));
+            dynamicFilters.push(...temporalFilters(field, control.operator, value, control.type));
             continue;
         }
-        filters.push({ field, operator: control.operator, value: normalizedValue, type: control.type });
+        dynamicFilters.push({ field, operator: control.operator, value: normalizedValue, type: control.type });
     }
-    return { ...visualization.queryPlan, filters, page: 1 };
+    if (dynamicFilters.length) {
+        filterGroups = filterGroups.length
+            ? filterGroups.map((group) => [...group, ...dynamicFilters])
+            : [dynamicFilters];
+    }
+    return { ...visualization.queryPlan, filterGroups, page: 1 };
 }

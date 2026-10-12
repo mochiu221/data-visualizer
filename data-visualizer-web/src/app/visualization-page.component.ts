@@ -11,22 +11,23 @@ Chart.register(ArcElement, BarController, BarElement, CategoryScale, DoughnutCon
 const donutLabelsPlugin: Plugin<'doughnut'> = {
   id: 'donutLabels',
   afterDatasetsDraw(chart) {
-    const values = (chart.data.datasets[0]?.data ?? []).map((value) => Number(value));
-    const total = values.reduce((sum, value) => sum + Math.max(value, 0), 0);
-    if (!total) return;
     const context = chart.ctx;
-    const metadata = chart.getDatasetMeta(0);
     context.save();
     context.fillStyle = '#ffffff';
-    context.font = '600 11px Arial';
+    context.font = '600 10px Arial';
     context.textAlign = 'center';
     context.textBaseline = 'middle';
-    metadata.data.forEach((arc, index) => {
-      const value = Math.max(values[index] ?? 0, 0);
-      if (!value) return;
-      const position = arc.tooltipPosition(false);
-      if (position.x == null || position.y == null) return;
-      context.fillText(`${Math.round(value / total * 100)}%`, position.x, position.y);
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const values = (dataset.data ?? []).map((value) => Number(value));
+      const total = values.reduce((sum, value) => sum + Math.max(value, 0), 0);
+      if (!total) return;
+      chart.getDatasetMeta(datasetIndex).data.forEach((arc, index) => {
+        const value = Math.max(values[index] ?? 0, 0);
+        if (!value) return;
+        const position = arc.tooltipPosition(false);
+        if (position.x == null || position.y == null) return;
+        context.fillText(`${Math.round(value / total * 100)}%`, position.x, position.y);
+      });
     });
     context.restore();
   }
@@ -49,7 +50,7 @@ interface Visualization {
   schema?: Array<{ name: string; type: string }>;
   chart?: { xAxis: { field: string; label: string; scale?: 'category' | 'time'; timeUnit?: 'millisecond' | 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year' }; yAxis: { field: string; label: string; scale?: 'category' | 'time' }; yAxes?: Array<{ field: string; label: string; scale?: 'category' | 'time' }>; yAggregation: string };
   filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to'; category?: boolean }>;
-  queryPlan?: { select: Array<{ field: string; label?: string }>; groupBy: string[]; page: number; pageSize: number; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; sort: { field: string; direction: string } | null };
+  queryPlan?: { select: Array<{ field: string; label?: string }>; groupBy: string[]; page: number; pageSize: number; filterGroups: Array<Array<{ field: string; operator: string; value: string | number | boolean }>>; sort: { field: string; direction: string } | null };
 }
 type FilterValue = string | number | boolean | null;
 type RefreshInterval = 0 | 30_000 | 60_000 | 300_000;
@@ -106,6 +107,10 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   filterKey(control: Visualization['filterControls'][number]): string {
     return `${control.field}::${control.operator}`;
+  }
+
+  filterCount(): number {
+    return this.visualization?.queryPlan?.filterGroups.reduce((count, group) => count + group.length, 0) ?? 0;
   }
 
   ngOnInit(): void {
@@ -351,11 +356,19 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     }
     this.donutChart?.destroy();
     const colors = ['#2b805d', '#d77b43', '#73b58e', '#c65d4c', '#4e7891', '#b38b4a'];
+    const measures = this.selectedMeasureFields(visualization);
     this.donutChart = new Chart<'doughnut', number[], string>(this.donutCanvas.nativeElement, {
       type: 'doughnut',
       data: {
         labels: visualization.data.map((item) => this.chartLabel(item)),
-        datasets: [{ data: visualization.data.map((item) => Math.max(this.chartValue(item, this.selectedDonutMeasure()), 0)), backgroundColor: visualization.data.map((_item, index) => colors[index % colors.length]), borderColor: '#ffffff', borderWidth: 3, hoverOffset: 6 }]
+        datasets: measures.map((field) => ({
+          label: this.fieldLabel(field, visualization.chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === visualization.chart?.yAxis.field ? visualization.chart.yAxis.label : undefined)),
+          data: visualization.data.map((item) => Math.max(this.chartValue(item, field), 0)),
+          backgroundColor: visualization.data.map((_item, index) => colors[index % colors.length]),
+          borderColor: '#ffffff',
+          borderWidth: 3,
+          hoverOffset: 6
+        }))
       },
       options: {
         responsive: true,
@@ -363,17 +376,22 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         cutout: '62%',
         plugins: {
           legend: { position: 'right', labels: { color: '#718078', padding: 14, usePointStyle: true } },
-          tooltip: { displayColors: false, padding: 10 }
+          tooltip: {
+            displayColors: false,
+            padding: 10,
+            callbacks: { label: (context) => `${context.dataset.label}: ${context.formattedValue}` }
+          }
         }
       },
       plugins: [donutLabelsPlugin]
     });
   }
 
-  private selectedDonutMeasure(): string | undefined {
-    const chart = this.visualization?.chart;
-    if (!chart) return undefined;
-    return this.displayFields().find((field) => field === chart.yAxis.field || chart.yAxes?.some((axis) => axis.field === field)) ?? chart.yAxis.field;
+  private selectedMeasureFields(visualization: Visualization): string[] {
+    const chart = visualization.chart;
+    if (!chart) return [];
+    const selectedMeasures = this.displayFields().filter((field) => field === chart.yAxis.field || chart.yAxes?.some((axis) => axis.field === field));
+    return selectedMeasures.length ? selectedMeasures : [chart.yAxis.field];
   }
 
   private renderBarChart(): void {
@@ -384,32 +402,51 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
       return;
     }
     this.barChart?.destroy();
-    const selectedMeasures = this.displayFields().filter((field) => visualization.chart?.yAxes?.some((axis) => axis.field === field) || field === visualization.chart?.yAxis.field);
-    const measureField = selectedMeasures[0] ?? visualization.chart?.yAxis.field;
+    const selectedMeasures = this.selectedMeasureFields(visualization);
+    const measureLabel = (field: string): string => this.fieldLabel(field, visualization.chart?.yAxes?.find((axis) => axis.field === field)?.label ?? (field === visualization.chart?.yAxis.field ? visualization.chart.yAxis.label : undefined));
     const xAxisField = visualization.chart?.xAxis.field;
     const groupBy = visualization.queryPlan?.groupBy ?? [];
     const seriesField = groupBy.length >= 2 && groupBy[0] === xAxisField ? groupBy[1] : undefined;
     const groupedLabels = seriesField ? [...new Set(visualization.data.map((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!]})))] : [];
     const seriesLabels = seriesField ? [...new Set(visualization.data.map((item) => this.chartLabel({ [xAxisField!]: item[seriesField] })))] : [];
     const seriesColors = ['#73b58e', '#d77b43', '#4e7891', '#b38b4a', '#c65d4c', '#756bb1', '#a64d79', '#4f8b8b', '#9a6b38', '#3f6fa3', '#8c5948', '#2b805d'];
-    const colorForSeries = (series: string): string => {
-      let hash = 0;
-      for (const character of series) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-      return seriesColors[hash % seriesColors.length];
-    };
-    const values = seriesField
-      ? seriesLabels.flatMap((series) => groupedLabels.map((label) => {
-        const row = visualization.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series);
-        return Math.max(this.chartValue(row ?? {}, measureField), 0);
-      }))
-      : visualization.data.map((item) => Math.max(this.chartValue(item, measureField), 0));
+    const findRow = (label: string, series?: string): Record<string, string | number> | undefined => visualization.data.find((item) =>
+      this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label
+      && (!seriesField || this.chartLabel({ [xAxisField!]: item[seriesField] }) === series)
+    );
+    const datasets = seriesField
+      ? selectedMeasures.flatMap((field, measureIndex) => seriesLabels.map((series, seriesIndex) => ({
+        label: `${measureLabel(field)} · ${series}`,
+        data: groupedLabels.map((label) => Math.max(this.chartValue(findRow(label, series) ?? {}, field), 0)),
+        backgroundColor: seriesColors[(measureIndex * seriesLabels.length + seriesIndex) % seriesColors.length],
+        borderRadius: 5,
+        borderSkipped: false as const,
+        categoryPercentage: .8,
+        barPercentage: .7,
+        maxBarThickness: groupedLabels.length > 12 ? 42 : 78
+      })))
+      : selectedMeasures.map((field, measureIndex) => {
+        const values = visualization.data.map((item) => Math.max(this.chartValue(item, field), 0));
+        return {
+          label: measureLabel(field),
+          data: values,
+          backgroundColor: selectedMeasures.length === 1
+            ? values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e')
+            : seriesColors[measureIndex % seriesColors.length],
+          borderRadius: 5,
+          borderSkipped: false as const,
+          categoryPercentage: .8,
+          barPercentage: .7,
+          maxBarThickness: values.length > 12 ? 42 : 78
+        };
+      });
+    const values = datasets.flatMap((dataset) => dataset.data);
     const maximum = Math.max(0, ...values);
     const precision = values.some((value) => !Number.isInteger(value)) ? 2 : 0;
-    const isHorizontal = (seriesField ? groupedLabels.length : values.length) > 12;
+    const isHorizontal = (seriesField ? groupedLabels.length : visualization.data.length) > 12;
     const labels = seriesField ? groupedLabels : visualization.data.map((item) => this.chartLabel(item));
-    const datasets = seriesField
-      ? seriesLabels.map((series) => ({ label: series, data: groupedLabels.map((label) => { const row = visualization.data.find((item) => this.chartLabel({ [xAxisField!]: item[xAxisField!] }) === label && this.chartLabel({ [xAxisField!]: item[seriesField] }) === series); return Math.max(this.chartValue(row ?? {}, measureField), 0); }), backgroundColor: colorForSeries(series), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: groupedLabels.length > 12 ? 42 : 78 }))
-      : [{ label: visualization.chart ? this.fieldLabel(visualization.chart.yAxis.field, visualization.chart.yAxis.label) : 'Value', data: values, backgroundColor: values.map((_value, index) => index % 3 === 2 ? '#d77b43' : '#73b58e'), borderRadius: 5, borderSkipped: false, categoryPercentage: .8, barPercentage: .7, maxBarThickness: values.length > 12 ? 42 : 78 }];
+    const legendDisplay = Boolean(seriesField) || selectedMeasures.length > 1;
+    const axisTitle = selectedMeasures.length > 1 ? 'Value' : measureLabel(selectedMeasures[0] ?? '');
     this.barChart = new Chart<'bar', number[], string>(this.barCanvas.nativeElement, {
       type: 'bar',
       data: {
@@ -420,13 +457,13 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
         indexAxis: isHorizontal ? 'y' : 'x',
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { display: Boolean(seriesField), labels: { color: '#718078', usePointStyle: true } }, tooltip: { displayColors: Boolean(seriesField), padding: 10 } },
+        plugins: { legend: { display: legendDisplay, labels: { color: '#718078', usePointStyle: true } }, tooltip: { displayColors: legendDisplay, padding: 10 } },
         scales: isHorizontal ? {
-          x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: visualization.chart ? this.fieldLabel(visualization.chart.yAxis.field, visualization.chart.yAxis.label) : 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
+          x: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: axisTitle, color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } },
           y: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, padding: 8 } }
         } : {
           x: { grid: { display: false }, border: { display: false }, ticks: { color: (context) => String(context.tick.label) === 'NULL' ? '#c65d4c' : '#718078', autoSkip: false, maxRotation: 60, minRotation: 45, padding: 8 } },
-          y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: visualization.chart ? this.fieldLabel(visualization.chart.yAxis.field, visualization.chart.yAxis.label) : 'Value', color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
+          y: { beginAtZero: true, suggestedMax: maximum || 1, title: { display: true, text: axisTitle, color: '#718078', font: { size: 11, weight: 600 } }, grid: { color: '#e8efeb' }, border: { display: false }, ticks: { color: '#718078', padding: 8, precision } }
         }
       }
     });

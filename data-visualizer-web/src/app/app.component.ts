@@ -12,7 +12,7 @@ interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface JoinDefinition { source: string; leftField: string; rightField: string; type: 'inner' | 'left'; }
 interface Visualization { id: string; title: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
-interface QueryPlanPreview { select: Array<{ field: string; label?: string }>; filters: Array<{ field: string; operator: string; value: string | number | boolean }>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
+interface QueryPlanPreview { select: Array<{ field: string; label?: string }>; filterGroups: Array<Array<{ field: string; operator: string; value: string | number | boolean }>>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAxes?: Array<{ field: string; label: string; scale: string }>; yAggregation: string; }
 interface VisualizationDefinitionPreview { queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; selectMode: 'single' | 'multiple'; defaultSelects: string[]; title: string; type: ChartType; chart: ChartPreview; }
 interface VisualizationPreview extends Visualization { request: string; connectionId: string; query: string; queryParameters: Array<string | number | boolean>; queryPlan: QueryPlanPreview; filterControls: FilterControlPreview[]; chart: ChartPreview; schema: unknown; }

@@ -194,7 +194,7 @@ export function quoteField(field: string, dialect: 'mssql' | 'postgresql' | 'mys
 
 export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql' | 'mysql', join?: JoinDefinition) {
     const values: Array<string | number | boolean> = [];
-    const clauses = plan.filters.map((filter) => {
+    const compileFilter = (filter: QueryPlan['filterGroups'][number][number]): string => {
         const field = sqlQueryField(filter.field, join, dialect);
         const index = values.push(filter.value) - 1;
         const parameter = dialect === 'mssql' ? `@p${index}` : dialect === 'postgresql' ? `$${index + 1}` : '?';
@@ -206,8 +206,31 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
         if (filter.operator === 'contains') return dialect === 'mssql' ? `${field} LIKE '%' + ${parameter} + '%'` : dialect === 'postgresql' ? `${field} ILIKE '%' || ${parameter} || '%'` : `${field} LIKE CONCAT('%', ${parameter}, '%')`;
         const operator = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' }[filter.operator];
         return `${field} ${operator} ${comparisonParameter}`;
-    });
-    return { values, where: clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '' };
+    };
+    const groups = plan.filterGroups.map((group) => `(${group.map(compileFilter).join(' AND ')})`);
+    return { values, where: groups.length ? ` WHERE ${groups.join(' OR ')}` : '' };
+}
+
+function mongoFilterCondition(filter: QueryPlan['filterGroups'][number][number]): Record<string, unknown> {
+    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(filter.field)) throw new Error('Filter field contains invalid characters.');
+    let value: string | number | boolean | Date = filter.value;
+    if ((filter.type === 'date' || filter.type === 'datetime') && typeof value === 'string') {
+        const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+        const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
+            ? `${normalized}T00:00:00.000Z`
+            : /(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized) ? normalized : `${normalized}Z`;
+        value = new Date(dateValue);
+        if (Number.isNaN(value.getTime())) throw new Error('Date filter value must be valid.');
+    }
+    if (filter.operator === 'contains') return { [filter.field]: { $regex: String(filter.value), $options: 'i' } };
+    const operator = { eq: '$eq', neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator];
+    return { [filter.field]: { [operator]: value } };
+}
+
+function buildMongoFilters(plan: QueryPlan): Record<string, unknown> {
+    const groups = plan.filterGroups.map((group) => ({ $and: group.map(mongoFilterCondition) }));
+    if (!groups.length) return {};
+    return groups.length === 1 ? groups[0] : { $or: groups };
 }
 
 function selectionField(selection: SelectField): string { return selection.field; }
@@ -280,18 +303,7 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
     if (join) throw new Error('Joining collections is not supported for MongoDB.');
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
         plan.select.forEach((selection) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
-        const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
-            const existing = result[filter.field];
-            if (filter.operator === 'contains') {
-                result[filter.field] = { $regex: String(filter.value), $options: 'i' };
-            } else if (filter.operator === 'eq') {
-                result[filter.field] = filter.value;
-            } else {
-                const operator = { neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator];
-                result[filter.field] = { ...(existing && typeof existing === 'object' ? existing : {}), [operator]: filter.value };
-            }
-            return result;
-        }, {});
+        const filters = buildMongoFilters(plan);
         if (plan.groupBy.length) {
             const group = Object.fromEntries(plan.groupBy.map((field) => {
                 if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
@@ -333,20 +345,7 @@ export async function queryPreview(connection: Connection, source: string, plan:
         const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
-            const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
-                if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(filter.field)) throw new Error('Filter field contains invalid characters.');
-                const value = filter.type === 'datetime' && typeof filter.value === 'string' ? new Date(`${filter.value.replace(' ', 'T')}Z`) : filter.value;
-                const mongoOperator = filter.operator === 'contains' ? undefined : ({ eq: '$eq', neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator]);
-                if (filter.operator === 'contains') {
-                    result[filter.field] = { $regex: String(filter.value), $options: 'i' };
-                } else if (filter.operator === 'eq') {
-                    result[filter.field] = value;
-                } else {
-                    const existing = result[filter.field];
-                    result[filter.field] = { ...(existing && typeof existing === 'object' ? existing : {}), [mongoOperator!]: value };
-                }
-                return result;
-            }, {});
+            const filters = buildMongoFilters(plan);
             if (plan.groupBy.length) {
                 const groupId = Object.fromEntries(plan.groupBy.map((field) => {
                     if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
@@ -435,13 +434,7 @@ export async function countPreview(connection: Connection, source: string, plan:
         const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
-            const filters = plan.filters.reduce<Record<string, unknown>>((result, filter) => {
-                const value = filter.type === 'datetime' && typeof filter.value === 'string' ? new Date(`${filter.value.replace(' ', 'T')}Z`) : filter.value;
-                if (filter.operator === 'contains') result[filter.field] = { $regex: String(filter.value), $options: 'i' };
-                else if (filter.operator === 'eq') result[filter.field] = value;
-                else result[filter.field] = { [({ neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator])]: value };
-                return result;
-            }, {});
+            const filters = buildMongoFilters(plan);
             if (!plan.groupBy.length) return await client.db(connection.database).collection(source).countDocuments(filters);
             const groupId = Object.fromEntries(plan.groupBy.map((field) => {
                 if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
