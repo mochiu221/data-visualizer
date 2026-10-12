@@ -59,14 +59,21 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
     const controls = new Map(visualization.filterControls.map((control) => [controlKey(control), control]));
     for (const key of Object.keys(parsed.data)) if (!controls.has(key) && !visualization.filterControls.some((control) => control.field === key)) throw new Error(`Filter field is not available: ${key}`);
     const controlledFields = new Set(visualization.filterControls.map((control) => control.field));
-    let filterGroups = visualization.queryPlan.filterGroups
+    const baseGroups = visualization.queryPlan.filterGroups
         .map((group) => group.filter((filter) => !controlledFields.has(filter.field)))
         .filter((group) => group.length > 0);
-    const dynamicFilters: QueryPlan['filterGroups'][number] = [];
+    const alternatives: QueryPlan['filterGroups'][number][][] = [];
     for (const [key, value] of Object.entries(parsed.data)) {
-        if (value === null || value === '') continue;
+        if (value === null || value === '' || (Array.isArray(value) && !value.length)) continue;
         const control = controls.get(key) ?? controls.get(`${key}::${visualization.filterControls.find((item) => item.field === key)?.operator}`)!;
         const field = control.field;
+        if (Array.isArray(value)) {
+            if (control.type !== 'text' || control.category) throw new Error(`Multiple values are only supported for text filter ${field}.`);
+            const values = [...new Set(value.map((item) => item.trim()).filter(Boolean))];
+            if (!values.length) continue;
+            alternatives.push(values.map((item) => [{ field, operator: control.operator, value: item, type: 'text' }]));
+            continue;
+        }
         const normalizedValue = control.type === 'number' && typeof value === 'string' ? Number(value) : value;
         if (control.type === 'number' && (typeof normalizedValue !== 'number' || !Number.isFinite(normalizedValue))) throw new Error(`Filter value for ${field} must be a number.`);
         if (control.type === 'boolean' && typeof value !== 'boolean') throw new Error(`Filter value for ${field} must be true or false.`);
@@ -74,15 +81,16 @@ export function applyFilterValues(visualization: Visualization, input: unknown):
         if (control.type === 'date' || control.type === 'datetime' || control.type === 'time') {
             if (typeof value !== 'string') throw new Error(`Filter value for ${field} must be a date and time.`);
             if (control.type !== 'time' && Number.isNaN(Date.parse(value))) throw new Error(`Filter value for ${field} must be a valid date and time.`);
-            dynamicFilters.push(...temporalFilters(field, control.operator, value, control.type));
+            alternatives.push([temporalFilters(field, control.operator, value, control.type)]);
             continue;
         }
-        dynamicFilters.push({ field, operator: control.operator, value: normalizedValue, type: control.type });
+        alternatives.push([[{ field, operator: control.operator, value: normalizedValue, type: control.type }]]);
     }
-    if (dynamicFilters.length) {
-        filterGroups = filterGroups.length
-            ? filterGroups.map((group) => [...group, ...dynamicFilters])
-            : [dynamicFilters];
+    let filterGroups = baseGroups.length ? baseGroups : [[]];
+    for (const options of alternatives) {
+        const expandedCount = filterGroups.length * options.length;
+        if (expandedCount > 100) throw new Error('Too many combinations of filter values. Use 100 or fewer OR alternatives.');
+        filterGroups = filterGroups.flatMap((group) => options.map((option) => [...group, ...option]));
     }
-    return { ...visualization.queryPlan, filterGroups, page: 1 };
+    return { ...visualization.queryPlan, filterGroups: filterGroups.filter((group) => group.length), page: 1 };
 }

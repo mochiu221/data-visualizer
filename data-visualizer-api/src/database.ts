@@ -195,15 +195,21 @@ export function quoteField(field: string, dialect: 'mssql' | 'postgresql' | 'mys
 export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql' | 'mysql', join?: JoinDefinition) {
     const values: Array<string | number | boolean> = [];
     const compileFilter = (filter: QueryPlan['filterGroups'][number][number]): string => {
-        const field = sqlQueryField(filter.field, join, dialect);
+        const rawField = sqlQueryField(filter.field, join, dialect);
+        const caseInsensitiveText = filter.type === 'text' && typeof filter.value === 'string';
+        const field = caseInsensitiveText ? `LOWER(${rawField})` : rawField;
         const index = values.push(filter.value) - 1;
         const parameter = dialect === 'mssql' ? `@p${index}` : dialect === 'postgresql' ? `$${index + 1}` : '?';
-        const comparisonParameter = dialect === 'mssql'
+        const comparisonParameter = caseInsensitiveText
+            ? `LOWER(${parameter})`
+            : dialect === 'mssql'
             && typeof filter.value === 'string'
             && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(filter.value)
             ? `CONVERT(datetime2(7), REPLACE(${parameter}, 'Z', ''))`
             : parameter;
-        if (filter.operator === 'contains') return dialect === 'mssql' ? `${field} LIKE '%' + ${parameter} + '%'` : dialect === 'postgresql' ? `${field} ILIKE '%' || ${parameter} || '%'` : `${field} LIKE CONCAT('%', ${parameter}, '%')`;
+        if (filter.operator === 'contains') return dialect === 'mysql'
+            ? `${field} LIKE CONCAT('%', ${comparisonParameter}, '%')`
+            : `${field} LIKE '%' ${dialect === 'mssql' ? '+' : '||'} ${comparisonParameter} ${dialect === 'mssql' ? '+' : '||'} '%'`;
         const operator = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' }[filter.operator];
         return `${field} ${operator} ${comparisonParameter}`;
     };
@@ -223,6 +229,10 @@ function mongoFilterCondition(filter: QueryPlan['filterGroups'][number][number])
         if (Number.isNaN(value.getTime())) throw new Error('Date filter value must be valid.');
     }
     if (filter.operator === 'contains') return { [filter.field]: { $regex: String(filter.value), $options: 'i' } };
+    if (filter.type === 'text' && typeof value === 'string') {
+        const operator = { eq: '$eq', neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator];
+        return { $expr: { [operator]: [{ $toLower: `$${filter.field}` }, value.toLowerCase()] } };
+    }
     const operator = { eq: '$eq', neq: '$ne', gt: '$gt', gte: '$gte', lt: '$lt', lte: '$lte' }[filter.operator];
     return { [filter.field]: { [operator]: value } };
 }

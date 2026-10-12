@@ -6,7 +6,62 @@
   <ng-container *ngIf="visualization as item">
     <header class="detail-head"><div><h1>{{ item.title }}</h1><p>{{ item.source }} · {{ displayChartType() }} chart</p></div><label class="auto-refresh-control"><span>Auto refresh</span><select [ngModel]="refreshInterval" (ngModelChange)="setRefreshInterval($event)" aria-label="Auto refresh interval"><option [ngValue]="0">Off</option><option [ngValue]="30000">30 seconds</option><option [ngValue]="60000">1 minute</option><option [ngValue]="300000">5 minutes</option></select></label></header>
     <section class="query-card"><p class="eyebrow">EXECUTED QUERY</p><pre class="query-text">{{ item.query || item.request }}</pre><div class="query-parameters" *ngIf="item.queryParameters?.length"><span class="eyebrow">QUERY PARAMETERS</span><div class="query-parameter" *ngFor="let value of item.queryParameters; let index = index"><code>{{ queryParameterName(index) }}</code><span>{{ queryParameterValue(value) }}</span></div></div></section>
-    <section class="filters" *ngIf="item.filterControls.length"><div class="filter-content"><div class="filter-heading"><div><p class="eyebrow">FILTER DATA</p><p class="filter-hint">Narrow the live result with the controls below.</p></div><div class="filter-heading-actions"><span class="filter-count">{{ item.filterControls.length }} available</span><button class="icon-refresh" type="button" aria-label="Refresh filtered query" title="Refresh filtered query" (click)="applyFilters()">↻</button></div></div><div class="filter-grid"><div *ngFor="let group of filterGroups(); trackBy: trackFilterGroup" [class.filter-range]="group.controls.length > 1"><label *ngFor="let control of group.controls; trackBy: trackFilterControl"><span>{{ fieldLabel(control.field, control.label) }}</span><select *ngIf="control.category" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><option [ngValue]="null">All</option><option *ngFor="let option of item.filterOptions?.[filterKey(control)]" [ngValue]="option">{{ option }}</option></select><input *ngIf="!control.category && (control.type === 'text' || control.type === 'number')" [type]="control.type" [placeholder]="control.type === 'number' ? 'Any value' : 'Search...'" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="!control.category && control.type === 'date'" type="date" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="!control.category && control.type === 'time'" type="time" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><input *ngIf="!control.category && control.type === 'datetime'" type="datetime-local" lang="en-GB" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><select *ngIf="!control.category && control.type === 'boolean'" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)"><option [ngValue]="null">Any</option><option [ngValue]="true">Yes</option><option [ngValue]="false">No</option></select></label></div></div></div><div class="filter-actions"><button class="refresh" (click)="clearFilters()">Clear</button><button class="apply" (click)="applyFilters()">Apply filters</button></div></section>
+    <section class="filters" *ngIf="item.filterControls.length">
+      <div class="filter-content">
+        <div class="filter-heading">
+          <div>
+            <p class="eyebrow">FILTER DATA</p>
+          </div>
+          <div class="filter-heading-actions">
+            <span class="filter-count">{{ item.filterControls.length }} available</span>
+          </div>
+        </div>
+        <div class="filter-grid">
+          <div *ngFor="let group of filterGroups(); trackBy: trackFilterGroup" [class.filter-range]="group.controls.length > 1">
+            <div *ngFor="let control of group.controls; trackBy: trackFilterControl">
+              <div *ngIf="!control.category && control.type === 'text'; else standardFilterControl" class="text-filter-control">
+                <span class="text-filter-label">{{ fieldLabel(control.field, control.label) }}</span>
+                <div class="text-filter-editor">
+                  <div class="text-filter-entry">
+                    <input type="text" [placeholder]="textFilterValues(control).length ? 'Add another value...' : 'Type a value...'" [attr.aria-label]="fieldLabel(control.field, control.label) + ' value'" [ngModel]="textFilterDrafts[filterKey(control)]" (ngModelChange)="textFilterDrafts[filterKey(control)] = $event" (keydown.enter)="$event.preventDefault(); addTextFilterValue(control)" [disabled]="textFilterValues(control).length >= 10">
+                    <button type="button" class="text-filter-add" (click)="addTextFilterValue(control)" [disabled]="!textFilterDrafts[filterKey(control)].trim() || textFilterValues(control).length >= 10">Add</button>
+                  </div>
+                  <div class="text-filter-values" *ngIf="textFilterValues(control).length" aria-label="Text values combined with OR">
+                    <ng-container *ngFor="let value of textFilterValues(control); let last = last">
+                      <span class="text-filter-chip"><span>{{ value }}</span><button type="button" [attr.aria-label]="'Remove ' + value" (click)="removeTextFilterValue(control, value)">×</button></span>
+                      <span class="text-filter-or" *ngIf="!last">OR</span>
+                    </ng-container>
+                  </div>
+                  <span class="text-filter-count">{{ textFilterValues(control).length }}/10 values</span>
+                </div>
+              </div>
+              <ng-template #standardFilterControl>
+                <label>
+                  <span>{{ fieldLabel(control.field, control.label) }}</span>
+                  <select *ngIf="control.category" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                    <option [ngValue]="null">All</option>
+                    <option *ngFor="let option of item.filterOptions?.[filterKey(control)]" [ngValue]="option">{{ option }}</option>
+                  </select>
+                  <input *ngIf="!control.category && control.type === 'number'" type="number" placeholder="Any value" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                  <input *ngIf="!control.category && control.type === 'date'" type="date" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                  <input *ngIf="!control.category && control.type === 'time'" type="time" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                  <input *ngIf="!control.category && control.type === 'datetime'" type="datetime-local" lang="en-GB" step="1" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                  <select *ngIf="!control.category && control.type === 'boolean'" [ngModel]="filterValues[filterKey(control)]" (ngModelChange)="setFilterValue(control, $event)">
+                    <option [ngValue]="null">Any</option>
+                    <option [ngValue]="true">Yes</option>
+                    <option [ngValue]="false">No</option>
+                  </select>
+                </label>
+              </ng-template>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="filter-actions">
+        <button class="refresh" (click)="clearFilters()">Clear</button>
+        <button class="apply" (click)="applyFilters()">Apply filters</button>
+      </div>
+    </section>
     <section class="visual-frame">
       <div class="plot-selector" *ngIf="selectableFields().length > 1">
         <span class="plot-selector-label">SHOW</span>
@@ -20,7 +75,6 @@
         <button type="button" [class.active]="displayChartType() === 'bar'" [attr.aria-pressed]="displayChartType() === 'bar'" (click)="setChartType('bar')">▥ Bar</button>
         <button type="button" [class.active]="displayChartType() === 'donut'" [attr.aria-pressed]="displayChartType() === 'donut'" (click)="setChartType('donut')">◉ Donut</button>
       </div>
-      <button class="icon-refresh plot-refresh" type="button" aria-label="Refresh plot" title="Refresh plot" (click)="applyFilters()">↻</button>
       <div class="bar-chart" *ngIf="displayChartType() === 'bar'" [style.height.px]="item.data.length > 12 ? item.data.length * 28 + 40 : 360"><canvas #barCanvas aria-label="Bar chart"></canvas></div>
       <div class="line-chart" *ngIf="item.type === 'line'">
         <div class="line-library-plot"><canvas #lineCanvas aria-label="Line chart"></canvas></div>

@@ -52,7 +52,7 @@ interface Visualization {
   filterControls: Array<{ field: string; label: string; type: 'text' | 'number' | 'boolean' | 'date' | 'time' | 'datetime'; operator: string; range?: 'from' | 'to'; category?: boolean }>;
   queryPlan?: { select: Array<{ field: string; label?: string }>; groupBy: string[]; page: number; pageSize: number; filterGroups: Array<Array<{ field: string; operator: string; value: string | number | boolean }>>; sort: { field: string; direction: string } | null };
 }
-type FilterValue = string | number | boolean | null;
+type FilterValue = string | number | boolean | string[] | null;
 type RefreshInterval = 0 | 30_000 | 60_000 | 300_000;
 
 @Component({
@@ -69,6 +69,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
   loading = true;
   error = '';
   filterValues: Record<string, FilterValue> = {};
+  textFilterDrafts: Record<string, string> = {};
   selectedField = '';
   selectedFields: string[] = [];
   private chartTypeOverride?: 'bar' | 'donut';
@@ -145,7 +146,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!id) { this.error = 'Visualization not found.'; this.loading = false; return; }
     this.loading = true;
     this.http.get<Visualization>(`${this.apiUrl}/visualizations/${id}`).subscribe({
-      next: (item) => { this.visualization = item; this.initializeDisplaySelection(item); this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), null])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
+      next: (item) => { this.visualization = item; this.initializeDisplaySelection(item); this.filterValues = Object.fromEntries(item.filterControls.map((control) => [this.filterKey(control), control.type === 'text' && !control.category ? [] : null])); this.textFilterDrafts = Object.fromEntries(item.filterControls.filter((control) => control.type === 'text' && !control.category).map((control) => [this.filterKey(control), ''])); this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.status === 404 ? 'Visualization not found.' : response.error?.message ?? 'Could not load the visualization.'; this.loading = false; }
     });
   }
@@ -154,7 +155,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!this.visualization) return;
     this.loading = true;
     this.error = '';
-    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
+    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.requestFilterValues(), page }).subscribe({
       next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); this.scheduleTableScrollStateUpdate(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not apply filters.'; this.loading = false; }
     });
@@ -220,7 +221,7 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
     if (!pagination || page < 1 || page > pagination.totalPages || page === pagination.page) return;
     if (!this.visualization) return;
     this.loading = true;
-    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.filterValues, page }).subscribe({
+    this.http.post<Visualization>(`${this.apiUrl}/visualizations/${this.visualization.id}/query`, { filters: this.requestFilterValues(), page }).subscribe({
       next: (item) => { this.visualization = item; this.loading = false; this.scheduleLineChartRender(); this.scheduleBarChartRender(); this.scheduleDonutChartRender(); },
       error: (response) => { this.error = response.error?.message ?? 'Could not load that page.'; this.loading = false; }
     });
@@ -267,6 +268,38 @@ export class VisualizationPageComponent implements OnDestroy, OnInit {
 
   setFilterValue(control: Visualization['filterControls'][number], value: FilterValue): void {
     this.filterValues[this.filterKey(control)] = value;
+  }
+
+  textFilterValues(control: Visualization['filterControls'][number]): string[] {
+    const value = this.filterValues[this.filterKey(control)];
+    if (Array.isArray(value)) return value;
+    return typeof value === 'string' ? value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) : [];
+  }
+
+  addTextFilterValue(control: Visualization['filterControls'][number]): void {
+    const key = this.filterKey(control);
+    const value = (this.textFilterDrafts[key] ?? '').trim();
+    if (!value) return;
+    const values = this.textFilterValues(control);
+    if (values.length >= 10 || values.some((item) => item.toLocaleLowerCase() === value.toLocaleLowerCase())) return;
+    this.filterValues[key] = [...values, value];
+    this.textFilterDrafts[key] = '';
+  }
+
+  removeTextFilterValue(control: Visualization['filterControls'][number], valueToRemove: string): void {
+    const key = this.filterKey(control);
+    this.filterValues[key] = this.textFilterValues(control).filter((value) => value !== valueToRemove);
+  }
+
+  private requestFilterValues(): Record<string, FilterValue | string[]> {
+    const controls = new Map((this.visualization?.filterControls ?? []).map((control) => [this.filterKey(control), control]));
+    return Object.fromEntries(Object.entries(this.filterValues).map(([key, value]) => {
+      const control = controls.get(key);
+      if (control?.type === 'text' && typeof value === 'string') {
+        return [key, value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)];
+      }
+      return [key, value];
+    }));
   }
 
   filterGroups(): Array<{ key: string; controls: Visualization['filterControls'] }> {

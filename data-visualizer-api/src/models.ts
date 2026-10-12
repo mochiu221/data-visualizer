@@ -119,7 +119,13 @@ export type SelectMode = z.infer<typeof generatedDefinition>['selectMode'];
 
 export type QueryPlan = z.infer<typeof queryPlanSchema>;
 
-export const filterValuesSchema = z.record(z.union([z.string(), z.number(), z.boolean(), z.null()]));
+export const filterValuesSchema = z.record(z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.array(z.string().max(200)).max(10),
+    z.null()
+]));
 
 export const connections: Connection[] = [];
 
