@@ -91,6 +91,7 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '',
         'FIELDS, GROUPING, AND MEASURES:',
         '- Use queryPlan.select for the fields that should be returned. For row-level tables, include every requested detail field; use an empty array only when all source fields are needed.',
+        '- For MongoDB schemas, nested object properties are represented by dotted paths such as "address.city". Treat each dotted schema entry as one exact field path and use it unchanged in select, groupBy, filters, sort, and chart axes; never replace it with the parent object or invent a flattened name.',
         ...(input.join ? [`- The joined field joined.${input.join.rightField} duplicates the matched key ${input.join.leftField}; do not add both to queryPlan.select. If the join key is requested, select ${input.join.leftField} from the first table instead.`] : []),
         '- Use queryPlan.groupBy for categorical or time dimensions that must be grouped before counting; every groupBy field must exist in the schema.',
         '- When queryPlan.groupBy is non-empty, include every groupBy field in queryPlan.select so grouped dimensions are visible.',

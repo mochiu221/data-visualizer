@@ -229,7 +229,7 @@
                 </select></label
               >
               <div class="schema-preview" *ngIf="joinSchemaColumns.length">
-                <span class="eyebrow">JOINED SCHEMA</span><span class="schema-field" *ngFor="let column of joinSchemaColumns">{{ column.name }} <small>{{ column.type }}</small></span>
+                <span class="eyebrow">JOINED SCHEMA</span><span class="schema-field" *ngFor="let column of joinSchemaColumns" [title]="column.name"><span [style.padding-left.px]="schemaFieldIndent(column.name)">{{ schemaFieldLabel(column.name) }}</span> <small>{{ column.type }}</small></span>
               </div>
             </div>
             <p class="join-note" *ngIf="selectedConnection?.type === 'mongodb'">MongoDB connections support one collection at a time.</p>
@@ -240,7 +240,7 @@
               <span class="eyebrow">SOURCE SCHEMA</span
               ><small *ngIf="isLoadingSchema">Reading columns...</small
               ><span class="schema-field" *ngFor="let column of schemaColumns"
-                >{{ column.name }} <small>{{ column.type }}</small></span
+                [title]="column.name"><span class="schema-name" [style.padding-left.px]="schemaFieldIndent(column.name)">{{ schemaFieldLabel(column.name) }}</span><small>{{ column.type }}</small></span
               >
             </div>
             <label

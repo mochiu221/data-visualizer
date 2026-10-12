@@ -104,6 +104,14 @@ export class AppComponent implements OnInit {
     const axes = definition.chart.yAxes?.length ? definition.chart.yAxes : [definition.chart.yAxis];
     return axes.map((axis) => `${axis.label} · ${axis.field}`).join(', ');
   }
+  schemaFieldLabel(field: string): string {
+    if (this.selectedConnection?.type !== 'mongodb') return field;
+    return field.split('.').at(-1) ?? field;
+  }
+  schemaFieldIndent(field: string): number {
+    if (this.selectedConnection?.type !== 'mongodb') return 0;
+    return Math.max(0, field.split('.').length - 1) * 14;
+  }
 
   ngOnInit(): void { this.loadConnections(); this.loadVisualizations(); }
   loadConnections(): void { this.http.get<Connection[]>(`${this.apiUrl}/connections`).subscribe({ next: (items) => { this.connections = items; this.apiOnline = true; this.refreshConnectionStatuses(); }, error: () => { this.apiOnline = false; this.notice = 'API is offline. Start the Compose stack to connect live data.'; } }); }

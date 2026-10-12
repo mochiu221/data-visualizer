@@ -10,6 +10,66 @@ function mongoConnectionUri(connection: Connection, password: string): string {
     return `mongodb://${credentials}${connection.host}:${connection.port}`;
 }
 
+function isMongoFieldPath(field: string): boolean {
+    return /^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*$/.test(field);
+}
+
+function mongoFieldType(value: unknown): string {
+    if (Array.isArray(value)) return 'array';
+    if (value === null) return 'null';
+    if (value instanceof Date) return 'date';
+    if (value && typeof value === 'object') return 'object';
+    return typeof value;
+}
+
+function collectMongoSchema(value: Record<string, unknown>, prefix = '', fields = new Map<string, string>()): Map<string, string> {
+    for (const [key, fieldValue] of Object.entries(value)) {
+        const path = prefix ? `${prefix}.${key}` : key;
+        if (!isMongoFieldPath(path)) continue;
+        const type = mongoFieldType(fieldValue);
+        const existingType = fields.get(path);
+        fields.set(path, existingType && existingType !== type ? 'mixed' : type);
+        if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue) && !(fieldValue instanceof Date) && Object.getPrototypeOf(fieldValue) === Object.prototype) {
+            collectMongoSchema(fieldValue as Record<string, unknown>, path, fields);
+        } else if (Array.isArray(fieldValue)) {
+            for (const item of fieldValue) {
+                if (item && typeof item === 'object' && !Array.isArray(item) && !(item instanceof Date) && Object.getPrototypeOf(item) === Object.prototype) {
+                    collectMongoSchema(item as Record<string, unknown>, path, fields);
+                }
+            }
+        }
+    }
+    return fields;
+}
+
+function mongoGroupId(groupBy: string[], chart: ChartDefinition | undefined): Record<string, string | Record<string, unknown>> {
+    return Object.fromEntries(groupBy.map((field, index) => {
+        if (!isMongoFieldPath(field)) throw new Error('Group field contains invalid characters.');
+        return [`field_${index}`, mongoGroupedField(field, chart)];
+    }));
+}
+
+function mongoGroupCalculations(aggregation: ChartDefinition['yAggregation'] | undefined, measureFields: string[]): Record<string, unknown> {
+    if (aggregation === 'sum') return Object.fromEntries(measureFields.map((field, index) => [`measure_${index}`, { $sum: `$${field}` }]));
+    if (aggregation === 'average') return Object.fromEntries(measureFields.map((field, index) => [`measure_${index}`, { $avg: `$${field}` }]));
+    if (aggregation === 'min') return Object.fromEntries(measureFields.map((field, index) => [`measure_${index}`, { $min: `$${field}` }]));
+    if (aggregation === 'max') return Object.fromEntries(measureFields.map((field, index) => [`measure_${index}`, { $max: `$${field}` }]));
+    return { count: { $sum: 1 } };
+}
+
+function mongoGroupedSortField(field: string, groupBy: string[], measureFields: string[]): string {
+    const groupIndex = groupBy.indexOf(field);
+    if (groupIndex >= 0) return `_id.field_${groupIndex}`;
+    const measureIndex = measureFields.indexOf(field);
+    return measureIndex >= 0 ? `measure_${measureIndex}` : field;
+}
+
+function mongoMeasureFields(plan: QueryPlan, chart: ChartDefinition | undefined): string[] {
+    return chart?.yAggregation === 'sum' || chart?.yAggregation === 'average' || chart?.yAggregation === 'min' || chart?.yAggregation === 'max'
+        ? groupedMeasureFields(plan)
+        : [];
+}
+
 export function quoteIdentifier(identifier: string): string {
     identifier = identifier.replace(/^\[([A-Za-z_][A-Za-z0-9_$]*)\](?:\.\[([A-Za-z_][A-Za-z0-9_$]*)\])?$/, (_, first: string, second?: string) => second ? `${first}.${second}` : first);
     if (!/^[A-Za-z_][A-Za-z0-9_$]*(\.[A-Za-z_][A-Za-z0-9_$]*)?$/.test(identifier)) throw new Error('Table or collection name contains invalid characters.');
@@ -19,6 +79,17 @@ export function quoteIdentifier(identifier: string): string {
 export function normalizePreview(value: unknown): Record<string, string | number> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return { value: String(value ?? '') };
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, item instanceof Date ? item.toISOString() : typeof item === 'number' || typeof item === 'string' ? item : JSON.stringify(item)]));
+}
+
+function mongoPathValue(value: unknown, path: string[]): unknown {
+    if (!path.length) return value;
+    if (Array.isArray(value)) return value.map((item) => mongoPathValue(item, path)).flat();
+    if (!value || typeof value !== 'object') return undefined;
+    return mongoPathValue((value as Record<string, unknown>)[path[0]], path.slice(1));
+}
+
+function normalizeMongoSelection(document: Record<string, unknown>, fields: string[]): Record<string, string | number> {
+    return normalizePreview(Object.fromEntries(fields.map((field) => [field, mongoPathValue(document, field.split('.')) ?? null])));
 }
 
 export function schemaSource(source: string): { schema?: string; table: string } {
@@ -95,9 +166,11 @@ export async function discoverSchema(connection: Connection, source: string): Pr
         const client = new MongoClient(mongoConnectionUri(connection, password), { tls: connection.tls, serverSelectionTimeoutMS: 10_000 });
         try {
             await client.connect();
-            const sample = await client.db(connection.database).collection(target.table).findOne();
-            if (!sample) throw new Error('The collection is empty or does not exist.');
-            return Object.entries(sample).map(([name, value]) => ({ name, type: Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value }));
+            const samples = await client.db(connection.database).collection(target.table).find().limit(20).toArray();
+            if (!samples.length) throw new Error('The collection is empty or does not exist.');
+            const fields = new Map<string, string>();
+            for (const sample of samples) collectMongoSchema(sample, '', fields);
+            return [...fields].map(([name, type]) => ({ name, type }));
         } finally { await client.close(); }
     }
     if (connection.type === 'mssql') {
@@ -150,7 +223,7 @@ export async function verifyConnection(connection: Connection): Promise<void> {
 }
 
 export async function listDistinctValues(connection: Connection, source: string, field: string, join?: JoinDefinition): Promise<Array<string | number | boolean>> {
-    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Category field contains invalid characters.');
+    if (connection.type === 'mongodb' ? !isMongoFieldPath(field) : !/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Category field contains invalid characters.');
     if (connection.type === 'mongodb') {
         if (join) throw new Error('Joining collections is not supported for MongoDB.');
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
@@ -218,7 +291,7 @@ export function buildSqlFilters(plan: QueryPlan, dialect: 'mssql' | 'postgresql'
 }
 
 function mongoFilterCondition(filter: QueryPlan['filterGroups'][number][number]): Record<string, unknown> {
-    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(filter.field)) throw new Error('Filter field contains invalid characters.');
+    if (!isMongoFieldPath(filter.field)) throw new Error('Filter field contains invalid characters.');
     let value: string | number | boolean | Date = filter.value;
     if ((filter.type === 'date' || filter.type === 'datetime') && typeof value === 'string') {
         const normalized = value.includes('T') ? value : value.replace(' ', 'T');
@@ -312,19 +385,17 @@ export function buildPreviewQuery(connection: Connection, source: string, plan: 
     if (connection.type === 'mongodb') {
     if (join) throw new Error('Joining collections is not supported for MongoDB.');
         if (!/^[A-Za-z0-9_.-]+$/.test(source)) throw new Error('Collection name contains invalid characters.');
-        plan.select.forEach((selection) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
-        const filters = buildMongoFilters(plan);
+        plan.select.forEach((selection) => { if (!isMongoFieldPath(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
+    if (plan.sort && !isMongoFieldPath(plan.sort.field)) throw new Error('Sort field contains invalid characters.');
+    const filters = buildMongoFilters(plan);
         if (plan.groupBy.length) {
-            const group = Object.fromEntries(plan.groupBy.map((field) => {
-                if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                return [field, mongoGroupedField(field, chart)];
-            }));
+            const group = mongoGroupId(plan.groupBy, chart);
             const aggregation = chart?.yAggregation ?? 'count';
-            const measureFields = groupedMeasureFields(plan);
-            const groupCalculations = aggregation === 'sum' ? Object.fromEntries(measureFields.map((field) => [field, { $sum: `$${field}` }])) : aggregation === 'average' ? Object.fromEntries(measureFields.map((field) => [field, { $avg: `$${field}` }])) : aggregation === 'min' ? Object.fromEntries(measureFields.map((field) => [field, { $min: `$${field}` }])) : aggregation === 'max' ? Object.fromEntries(measureFields.map((field) => [field, { $max: `$${field}` }])) : { count: { $sum: 1 } };
+            const measureFields = mongoMeasureFields(plan, chart);
+            const groupCalculations = mongoGroupCalculations(aggregation, measureFields);
             const sortStage = plan.sort
-                ? `, ${JSON.stringify({ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } })}`
-                : `, ${JSON.stringify({ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.${plan.groupBy[0]}`, null] }, 1, 0] } } })}, ${JSON.stringify({ $sort: { __categoryNullRank: 1, [`_id.${plan.groupBy[0]}`]: 1 } })}`;
+                ? `, ${JSON.stringify({ $sort: { [mongoGroupedSortField(plan.sort.field, plan.groupBy, measureFields)]: plan.sort.direction === 'asc' ? 1 : -1 } })}`
+                : `, ${JSON.stringify({ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.field_0`, null] }, 1, 0] } } })}, ${JSON.stringify({ $sort: { __categoryNullRank: 1, _id: 1 } })}`;
             return `db.${source}.aggregate([${JSON.stringify({ $match: filters })}, ${JSON.stringify({ $group: { _id: group, ...groupCalculations } })}${sortStage}])`;
         }
         const sort = plan.sort ? `.sort(${JSON.stringify({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 })})` : '';
@@ -357,20 +428,22 @@ export async function queryPreview(connection: Connection, source: string, plan:
             await client.connect();
             const filters = buildMongoFilters(plan);
             if (plan.groupBy.length) {
-                const groupId = Object.fromEntries(plan.groupBy.map((field) => {
-                    if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                    return [field, mongoGroupedField(field, chart)];
-                }));
-                const measureFields = groupedMeasureFields(plan);
-                const groupCalculations = chart?.yAggregation === 'sum' ? Object.fromEntries(measureFields.map((field) => [field, { $sum: `$${field}` }])) : chart?.yAggregation === 'average' ? Object.fromEntries(measureFields.map((field) => [field, { $avg: `$${field}` }])) : chart?.yAggregation === 'min' ? Object.fromEntries(measureFields.map((field) => [field, { $min: `$${field}` }])) : chart?.yAggregation === 'max' ? Object.fromEntries(measureFields.map((field) => [field, { $max: `$${field}` }])) : { count: { $sum: 1 } };
+                const groupId = mongoGroupId(plan.groupBy, chart);
+                const measureFields = mongoMeasureFields(plan, chart);
+                const groupCalculations = mongoGroupCalculations(chart?.yAggregation, measureFields);
                 const grouped = await client.db(connection.database).collection(source).aggregate([
                     { $match: filters },
                     { $group: { _id: groupId, ...groupCalculations } },
-                    ...(plan.sort ? [{ $sort: { [plan.groupBy.includes(plan.sort.field) ? `_id.${plan.sort.field}` : plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 } }] : [{ $set: { __categoryNullRank: { $cond: [{ $eq: [`$_id.${plan.groupBy[0]}`, null] }, 1, 0] } } }, { $sort: { __categoryNullRank: 1, [`_id.${plan.groupBy[0]}`]: 1 } }]),
+                    ...(plan.sort ? [{ $sort: { [mongoGroupedSortField(plan.sort.field, plan.groupBy, measureFields)]: plan.sort.direction === 'asc' ? 1 : -1 } }] : [{ $set: { __categoryNullRank: { $cond: [{ $eq: ['$_id.field_0', null] }, 1, 0] } } }, { $sort: { __categoryNullRank: 1, '_id.field_0': 1 } }]),
                     { $skip: (plan.page - 1) * plan.pageSize },
                     { $limit: plan.pageSize }
                 ]).toArray();
-                const normalized = grouped.map((row) => ({ ...row._id as Record<string, unknown>, ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id' && key !== '__categoryNullRank')) }));
+                const internalMeasureFields = new Set(measureFields.map((_field, index) => `measure_${index}`));
+                const normalized = grouped.map((row) => normalizePreview({
+                    ...Object.fromEntries(plan.groupBy.map((field, index) => [field, (row._id as Record<string, unknown>)[`field_${index}`]])),
+                    ...Object.fromEntries(measureFields.map((field, index) => [field, row[`measure_${index}`]])),
+                    ...Object.fromEntries(Object.entries(row).filter(([key]) => key !== '_id' && key !== '__categoryNullRank' && !internalMeasureFields.has(key)))
+                }));
                 if (!plan.sort) normalized.sort((left, right) => {
                     const leftValue = left[plan.groupBy[0]];
                     const rightValue = right[plan.groupBy[0]];
@@ -381,12 +454,17 @@ export async function queryPreview(connection: Connection, source: string, plan:
                 });
                 return normalized;
             }
-            plan.select.forEach((selection) => { if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
+            plan.select.forEach((selection) => { if (!isMongoFieldPath(selectionField(selection))) throw new Error('Selected field contains invalid characters.'); });
             const projection = plan.select.length ? { projection: Object.fromEntries(plan.select.map((selection) => [selectionField(selection), 1])) } : undefined;
             const cursor = client.db(connection.database).collection(source).find(filters, projection).skip((plan.page - 1) * plan.pageSize).limit(plan.pageSize);
-            if (plan.sort) cursor.sort({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 });
+            if (plan.sort) {
+                if (!isMongoFieldPath(plan.sort.field)) throw new Error('Sort field contains invalid characters.');
+                cursor.sort({ [plan.sort.field]: plan.sort.direction === 'asc' ? 1 : -1 });
+            }
             const documents = await cursor.toArray();
-            return documents.map(normalizePreview);
+            return plan.select.length
+                ? documents.map((document) => normalizeMongoSelection(document, plan.select.map(selectionField)))
+                : documents.map(normalizePreview);
         } finally {
             await client.close();
         }
@@ -446,10 +524,7 @@ export async function countPreview(connection: Connection, source: string, plan:
             await client.connect();
             const filters = buildMongoFilters(plan);
             if (!plan.groupBy.length) return await client.db(connection.database).collection(source).countDocuments(filters);
-            const groupId = Object.fromEntries(plan.groupBy.map((field) => {
-                if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(field)) throw new Error('Group field contains invalid characters.');
-                return [field, mongoGroupedField(field, chart)];
-            }));
+            const groupId = mongoGroupId(plan.groupBy, chart);
             const grouped = await client.db(connection.database).collection(source).aggregate([{ $match: filters }, { $group: { _id: groupId } }, { $count: 'total' }]).toArray();
             return Number((grouped[0] as { total?: number } | undefined)?.total ?? 0);
         } finally { await client.close(); }
