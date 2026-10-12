@@ -10,7 +10,8 @@ export async function generateJoinFields(request: string, primarySchema: SchemaC
     const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
     const endpoint = isDeepSeek ? 'https://api.deepseek.com/chat/completions' : `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
-    const model = process.env.AI_MODEL ?? (isDeepSeek ? 'deepseek-chat' : 'gpt-4o-mini');
+    const model = process.env.AI_MODEL;
+    if (!model) throw new Error('AI model is not specified. Set the AI_MODEL environment variable.');
     const prompt = [
         'Choose the best pair of columns to join two database tables for the user request.',
         'Return JSON only in this exact shape: {"leftField":"column from the first schema","rightField":"column from the second schema"}.',
@@ -59,7 +60,8 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
     const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
     if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
     const endpoint = isDeepSeek ? 'https://api.deepseek.com/chat/completions' : `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
-    const model = process.env.AI_MODEL ?? (isDeepSeek ? 'deepseek-chat' : 'gpt-4o-mini');
+    const model = process.env.AI_MODEL;
+    if (!model) throw new Error('AI model is not specified. Set the AI_MODEL environment variable.');
     const prompt = [
         'Create a safe database query plan and visualization definition from the user request.',
         'Return JSON only. Never return SQL, JavaScript, executable code, or arbitrary operators.',
