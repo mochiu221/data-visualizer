@@ -23,7 +23,11 @@ services:
       DATABASE_URL: postgres://visualizer:visualizer@postgres:5432/visualizer
       CREDENTIAL_ENCRYPTION_KEY: replace-with-a-32-byte-secret-key-123456
       AI_PROVIDER: ${AI_PROVIDER:-deepseek}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      AI_CHAT_COMPLETIONS_URL: ${AI_CHAT_COMPLETIONS_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-deepseek-flash}
     ports:
       - "3000:3000"

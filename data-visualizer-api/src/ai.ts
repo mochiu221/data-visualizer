@@ -4,14 +4,69 @@ import { generatedDefinition, visualizationInput } from './models.js';
 import type { JoinDefinition, SchemaColumn } from './models.js';
 
 type SampleRow = Record<string, string | number>;
+type ChatMessage = { role: 'system' | 'user'; content: string };
+
+async function requestChatCompletion(messages: ChatMessage[], purpose: 'join-selection' | 'visualization-definition'): Promise<string> {
+    const model = process.env.AI_MODEL?.trim();
+    if (!model) throw new Error('AI model is not specified. Set the AI_MODEL environment variable.');
+
+    let endpoint: string;
+    let apiKey: string | undefined;
+    if (aiProvider === 'deepseek') {
+        endpoint = 'https://api.deepseek.com/chat/completions';
+        apiKey = process.env.DEEPSEEK_API_KEY?.trim();
+        if (!apiKey) throw new Error('DEEPSEEK_API_KEY is required when AI_PROVIDER=deepseek.');
+    } else if (aiProvider === 'openai') {
+        const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
+        endpoint = `${baseUrl}/chat/completions`;
+        apiKey = process.env.OPENAI_API_KEY?.trim();
+        if (!apiKey) throw new Error('OPENAI_API_KEY is required when AI_PROVIDER=openai.');
+    } else if (aiProvider === 'custom') {
+        const configuredEndpoint = process.env.AI_CHAT_COMPLETIONS_URL?.trim() ?? '';
+        if (!configuredEndpoint) throw new Error('AI_CHAT_COMPLETIONS_URL is required when AI_PROVIDER=custom.');
+        let parsedEndpoint: URL;
+        try {
+            parsedEndpoint = new URL(configuredEndpoint);
+        } catch {
+            throw new Error('AI_CHAT_COMPLETIONS_URL must be a valid HTTP or HTTPS URL.');
+        }
+        if (parsedEndpoint.protocol !== 'http:' && parsedEndpoint.protocol !== 'https:') {
+            throw new Error('AI_CHAT_COMPLETIONS_URL must use HTTP or HTTPS.');
+        }
+        if (parsedEndpoint.username || parsedEndpoint.password) {
+            throw new Error('Do not include credentials in AI_CHAT_COMPLETIONS_URL. Use AI_API_KEY for bearer authentication.');
+        }
+        if (!/\/chat\/completions\/?$/i.test(parsedEndpoint.pathname)) {
+            parsedEndpoint.pathname = `${parsedEndpoint.pathname.replace(/\/+$/, '')}/chat/completions`;
+        }
+        endpoint = parsedEndpoint.toString();
+        apiKey = process.env.AI_API_KEY?.trim() || undefined;
+    } else {
+        throw new Error(`Unsupported AI_PROVIDER '${aiProvider}'. Use deepseek, openai, or custom.`);
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, temperature: 0, messages })
+    });
+    if (!response.ok) {
+        const status = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+        if (response.status === 405 && aiProvider === 'custom') {
+            const target = new URL(endpoint);
+            throw new Error(`Custom AI endpoint ${target.origin}${target.pathname} rejected POST with ${status}. Set AI_CHAT_COMPLETIONS_URL to an OpenAI-compatible chat-completions endpoint that accepts POST.`);
+        }
+        throw new Error(`AI provider ${purpose} request failed with status ${status}.`);
+    }
+    const responseBody = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = responseBody.choices?.[0]?.message?.content;
+    if (!content) throw new Error(`AI provider returned no ${purpose === 'join-selection' ? 'join-column selection' : 'visualization definition'}.`);
+    return content;
+}
 
 export async function generateJoinFields(request: string, primarySchema: SchemaColumn[], joinedSchema: SchemaColumn[]): Promise<Pick<JoinDefinition, 'leftField' | 'rightField'>> {
-    const isDeepSeek = aiProvider === 'deepseek';
-    const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
-    const endpoint = isDeepSeek ? 'https://api.deepseek.com/chat/completions' : `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
-    const model = process.env.AI_MODEL;
-    if (!model) throw new Error('AI model is not specified. Set the AI_MODEL environment variable.');
     const prompt = [
         'Choose the best pair of columns to join two database tables for the user request.',
         'Return JSON only in this exact shape: {"leftField":"column from the first schema","rightField":"column from the second schema"}.',
@@ -21,15 +76,10 @@ export async function generateJoinFields(request: string, primarySchema: SchemaC
         `First table schema: ${JSON.stringify(primarySchema)}`,
         `Second table schema: ${JSON.stringify(joinedSchema)}`
     ].join('\n');
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, temperature: 0, messages: [{ role: 'system', content: 'You select safe, semantically appropriate database join columns and return strict JSON.' }, { role: 'user', content: prompt }] })
-    });
-    if (!response.ok) throw new Error(`AI provider join-selection request failed with status ${response.status}.`);
-    const responseBody = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const content = responseBody.choices?.[0]?.message?.content;
-    if (!content) throw new Error('AI provider returned no join-column selection.');
+    const content = await requestChatCompletion([
+        { role: 'system', content: 'You select safe, semantically appropriate database join columns and return strict JSON.' },
+        { role: 'user', content: prompt }
+    ], 'join-selection');
     const json = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     let parsedJson: unknown;
     try {
@@ -56,12 +106,6 @@ export function parseModelJson(content: string): z.infer<typeof generatedDefinit
 export async function generateDefinition(input: z.infer<typeof visualizationInput>, schema: SchemaColumn[], sampleRows: SampleRow[] = []): Promise<z.infer<typeof generatedDefinition>> {
     console.log('Schema:', schema);
     console.log('Sample Rows:', sampleRows.slice(0, 5));
-    const isDeepSeek = aiProvider === 'deepseek';
-    const apiKey = isDeepSeek ? process.env.DEEPSEEK_API_KEY : process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error(`${isDeepSeek ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY'} is required when AI_PROVIDER=${aiProvider}.`);
-    const endpoint = isDeepSeek ? 'https://api.deepseek.com/chat/completions' : `${process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'}/chat/completions`;
-    const model = process.env.AI_MODEL;
-    if (!model) throw new Error('AI model is not specified. Set the AI_MODEL environment variable.');
     const prompt = [
         'Create a safe database query plan and visualization definition from the user request.',
         'Return JSON only. Never return SQL, JavaScript, executable code, or arbitrary operators.',
@@ -146,15 +190,10 @@ export async function generateDefinition(input: z.infer<typeof visualizationInpu
         '- Make every filterControl.label a concise, human-readable label based on both the field and operator, not just the raw field name. Use labels such as "Name contains", "Created after", "Created before", "Status equals", or "Amount at least"; distinguish labels when the same field has multiple operators.',
         '- Convert field names to readable words and title case where appropriate, while preserving meaningful acronyms. Do not use labels such as "Filter", "Value", or the field name alone.'
     ].join('\n');
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, temperature: 0, messages: [{ role: 'system', content: 'You are a strict JSON database-query and visualization-definition service.' }, { role: 'user', content: prompt }] })
-    });
-    if (!response.ok) throw new Error(`AI provider visualization-definition request failed with status ${response.status}.`);
-    const responseBody = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
-    const content = responseBody.choices?.[0]?.message?.content;
-    if (!content) throw new Error('AI provider returned no visualization definition.');
+    const content = await requestChatCompletion([
+        { role: 'system', content: 'You are a strict JSON database-query and visualization-definition service.' },
+        { role: 'user', content: prompt }
+    ], 'visualization-definition');
     console.log('Raw visualization definition content:', content);
     const parsed = parseModelJson(content);
     console.log('Parsed visualization definition:', parsed);
