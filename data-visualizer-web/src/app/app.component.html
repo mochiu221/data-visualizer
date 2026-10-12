@@ -127,18 +127,29 @@
             + New visualization
           </button>
         </section>
-        <section class="library-groups" *ngIf="visualizations.length">
-          <section class="table-group" *ngFor="let group of visualizationGroups()">
+        <section class="library-toolbar" *ngIf="visualizations.length">
+          <label class="library-search">
+            <span class="library-search-icon" aria-hidden="true">⌕</span>
+            <input type="search" [(ngModel)]="visualizationSearch" placeholder="Search charts, tables, or connections..." aria-label="Search saved visualizations">
+            <button *ngIf="visualizationSearch" type="button" class="library-search-clear" aria-label="Clear search" (click)="clearVisualizationSearch()">×</button>
+          </label>
+          <p class="library-results" aria-live="polite">
+            <strong>{{ filteredVisualizationCount() }}</strong> of {{ visualizations.length }} visualizations
+            <span> across {{ filteredVisualizationGroups().length }} {{ filteredVisualizationGroups().length === 1 ? 'table' : 'tables' }}</span>
+          </p>
+        </section>
+        <section class="library-groups" *ngIf="visualizations.length && filteredVisualizationGroups().length">
+          <section class="table-group" *ngFor="let group of filteredVisualizationGroups(); trackBy: trackVisualizationGroup">
             <header class="table-group-header">
-              <div class="table-group-icon" aria-hidden="true">▤</div>
-              <div class="table-group-title">
+              <span class="table-group-icon" aria-hidden="true">▤</span>
+              <span class="table-group-title">
                 <span class="eyebrow">{{ connectionName(group.connectionId) }}</span>
-                <h2>{{ group.source }}</h2>
-              </div>
+                <span class="table-group-name">{{ group.source }}</span>
+              </span>
               <span class="table-group-count">{{ group.items.length }} {{ group.items.length === 1 ? 'visualization' : 'visualizations' }}</span>
             </header>
             <div class="table-group-grid">
-              <article class="viz-card library-card" *ngFor="let visualization of group.items">
+              <article class="viz-card library-card" *ngFor="let visualization of group.items; trackBy: trackVisualization">
                 <div class="card-head">
                   <div>
                     <span class="type-label">{{ visualization.type }}<span class="type-suffix">{{ visualization.type === 'table' ? ' view' : ' chart' }}</span></span>
@@ -154,6 +165,12 @@
               </article>
             </div>
           </section>
+        </section>
+        <section class="library-no-results" *ngIf="visualizations.length && !filteredVisualizationGroups().length">
+          <span class="library-no-results-icon" aria-hidden="true">⌕</span>
+          <h2>No visualizations found</h2>
+          <p>Try a different chart title, table name, or connection.</p>
+          <button type="button" (click)="clearVisualizationSearch()">Clear search</button>
         </section>
         <section class="viz-grid" *ngIf="visualizations.length === 0">
           <article class="viz-card create-card" (click)="activeView = 'query'">

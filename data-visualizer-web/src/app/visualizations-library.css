@@ -19,3 +19,26 @@
   .table-group-count { max-width: 110px; white-space: normal; text-align: center; }
   .table-group-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px; }
 }
+.library-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: -10px 0 20px; }
+.library-search { display: flex; align-items: center; gap: 11px; width: min(580px, 100%); min-height: 50px; padding: 0 14px; border: 1px solid #dce7df; border-radius: 13px; background: #fff; box-shadow: 0 5px 18px rgba(31, 50, 43, .045); transition: border-color .18s ease, box-shadow .18s ease; }
+.library-search:focus-within { border-color: #77ae89; box-shadow: 0 0 0 4px rgba(43, 128, 93, .1); }
+.library-search-icon { color: #508467; font-size: 25px; line-height: 1; transform: rotate(-15deg); }
+.library-search input { width: 100%; min-width: 0; padding: 13px 0; border: 0; outline: 0; color: #17211b; background: transparent; font: 13px Arial, sans-serif; }
+.library-search input::placeholder { color: #96a198; }
+.library-search input::-webkit-search-cancel-button { display: none; }
+.library-search-clear { display: grid; flex: 0 0 28px; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 50%; color: #718078; background: #f0f4f1; font-size: 20px; cursor: pointer; }
+.library-results { flex: 0 0 auto; margin: 0; color: #829087; font: 12px Arial, sans-serif; }
+.library-results strong { color: #287451; font-size: 14px; }
+.table-group-title { display: block; }
+.table-group-title .eyebrow, .table-group-title .table-group-name { display: block; }
+.table-group-title .table-group-name { overflow-wrap: anywhere; color: #17211b; font: 600 20px/1.2 Georgia, serif; }
+.library-no-results { margin: 26px 0; padding: 50px 20px; border: 1px dashed #cad9ce; border-radius: 16px; background: linear-gradient(145deg, #f8fbf8, #fff); text-align: center; }
+.library-no-results-icon { color: #55916b; font-size: 36px; }
+.library-no-results h2 { margin: 12px 0 7px; color: #24362a; font: 400 23px Georgia, serif; }
+.library-no-results p { margin: 0 0 18px; color: #7f8d83; font: 13px Arial, sans-serif; }
+.library-no-results button { padding: 9px 14px; border: 1px solid #c9ddce; border-radius: 8px; color: #287451; background: #fff; font: 700 11px Arial, sans-serif; cursor: pointer; }
+@media (max-width: 700px) {
+  .library-toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .library-search { width: auto; }
+  .library-results { padding-left: 3px; }
+}

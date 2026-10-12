@@ -11,6 +11,7 @@ interface Connection { id: string; name: string; type: DatabaseType; host: strin
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface JoinDefinition { source: string; leftField: string; rightField: string; type: 'inner' | 'left'; }
 interface Visualization { id: string; title: string; connectionId: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
+interface VisualizationGroup { connectionId: string; source: string; items: Visualization[]; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
 interface QueryPlanPreview { select: Array<{ field: string; label?: string }>; filterGroups: Array<Array<{ field: string; operator: string; value: string | number | boolean }>>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAxes?: Array<{ field: string; label: string; scale: string }>; yAggregation: string; }
@@ -34,6 +35,11 @@ export class AppComponent implements OnInit {
   readonly maskedPassword = '********';
   connections: Connection[] = [];
   visualizations: Visualization[] = [];
+  visualizationSearch = '';
+  private filteredGroupsCacheSource?: Visualization[];
+  private filteredGroupsCacheConnections?: Connection[];
+  private filteredGroupsCacheSearch = '';
+  private filteredGroupsCache: VisualizationGroup[] = [];
   private _activeView = 'overview';
   private _notice = '';
   private noticeTimeout?: ReturnType<typeof setTimeout>;
@@ -81,15 +87,47 @@ export class AppComponent implements OnInit {
     return 'info';
   }
   get selectedConnection(): Connection | undefined { return this.connections.find((connection) => connection.id === this.query.connectionId); }
-  visualizationGroups(): Array<{ connectionId: string; source: string; items: Visualization[] }> {
-    const groups = new Map<string, { connectionId: string; source: string; items: Visualization[] }>();
+  visualizationGroups(): VisualizationGroup[] {
+    const groups = new Map<string, VisualizationGroup>();
     for (const item of this.visualizations) {
       const key = JSON.stringify([item.connectionId, item.source]);
       const group = groups.get(key) ?? { connectionId: item.connectionId, source: item.source, items: [] };
       group.items.push(item);
       groups.set(key, group);
     }
-    return [...groups.values()];
+    return [...groups.values()].sort((left, right) =>
+      `${this.connectionName(left.connectionId)} ${left.source}`.localeCompare(`${this.connectionName(right.connectionId)} ${right.source}`)
+    );
+  }
+  filteredVisualizationGroups(): VisualizationGroup[] {
+    const term = this.visualizationSearch.trim().toLocaleLowerCase();
+    if (this.filteredGroupsCacheSource === this.visualizations && this.filteredGroupsCacheConnections === this.connections && this.filteredGroupsCacheSearch === term) return this.filteredGroupsCache;
+    this.filteredGroupsCacheSource = this.visualizations;
+    this.filteredGroupsCacheConnections = this.connections;
+    this.filteredGroupsCacheSearch = term;
+    this.filteredGroupsCache = !term ? this.visualizationGroups() : this.visualizationGroups().flatMap((group) => {
+      const groupMatches = `${this.connectionName(group.connectionId)} ${group.source}`.toLocaleLowerCase().includes(term);
+      const items = groupMatches ? group.items : group.items.filter((item) =>
+        `${item.title} ${item.type} ${item.join?.source ?? ''}`.toLocaleLowerCase().includes(term)
+      );
+      return items.length ? [{ ...group, items }] : [];
+    });
+    return this.filteredGroupsCache;
+  }
+  filteredVisualizationCount(): number {
+    return this.filteredVisualizationGroups().reduce((count, group) => count + group.items.length, 0);
+  }
+  visualizationGroupKey(group: VisualizationGroup): string {
+    return JSON.stringify([group.connectionId, group.source]);
+  }
+  clearVisualizationSearch(): void {
+    this.visualizationSearch = '';
+  }
+  trackVisualizationGroup(_index: number, group: VisualizationGroup): string {
+    return JSON.stringify([group.connectionId, group.source]);
+  }
+  trackVisualization(_index: number, item: Visualization): string {
+    return item.id;
   }
   connectionName(connectionId: string): string {
     return this.connections.find((connection) => connection.id === connectionId)?.name ?? 'Saved connection';
