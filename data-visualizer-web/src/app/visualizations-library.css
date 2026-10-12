@@ -1,0 +1,21 @@
+.library-groups { display: grid; gap: 24px; }
+.table-group { overflow: hidden; border: 1px solid #e0e9e2; border-radius: 16px; background: #fff; box-shadow: 0 8px 24px rgba(31, 50, 43, .045); }
+.table-group-header { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 18px 22px; border-bottom: 1px solid #e9efea; background: linear-gradient(115deg, #f1f8f3, #fbfdfb 75%); }
+.table-group-icon { display: grid; flex: 0 0 40px; width: 40px; height: 40px; place-items: center; border: 1px solid #d7e8db; border-radius: 12px; color: #287451; background: #e5f2e8; font-size: 19px; }
+.table-group-title { min-width: 0; flex: 1; }
+.table-group-title .eyebrow { display: block; margin-bottom: 5px; color: #718078; font-size: 9px; }
+.table-group-title h2 { margin: 0; overflow-wrap: anywhere; color: #17211b; font: 600 20px/1.2 Georgia, serif; }
+.table-group-count { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #dce9df; border-radius: 999px; color: #47745a; background: rgba(255,255,255,.8); font: 700 10px Arial, sans-serif; }
+.table-group-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.table-group-grid .library-card { min-width: 0; min-height: 0; padding: 18px; border-color: #e6ece7; box-shadow: 0 2px 8px rgba(31, 50, 43, .025); }
+.table-group-grid .library-card:hover { transform: translateY(-2px); }
+.table-group-grid .library-card .card-head { min-height: 86px; }
+.table-group-grid .library-card h3 { min-height: 0; margin: 7px 0; font-size: 20px; }
+.type-suffix { color: #8a978e; font-weight: 400; letter-spacing: .04em; }
+.table-group-grid .chart-card-placeholder { justify-content: space-between; min-height: 50px; margin-top: 14px; padding: 12px 14px; }
+.library-open-icon { display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid #dce9df; border-radius: 8px; background: #fff; font-size: 16px; }
+@media (max-width: 700px) {
+  .table-group-header { gap: 10px; padding: 15px; }
+  .table-group-count { max-width: 110px; white-space: normal; text-align: center; }
+  .table-group-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 10px; }
+}

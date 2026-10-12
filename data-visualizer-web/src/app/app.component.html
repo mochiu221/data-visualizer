@@ -127,41 +127,40 @@
             + New visualization
           </button>
         </section>
-        <section class="viz-grid">
-          <article
-            class="viz-card create-card"
-            *ngIf="visualizations.length === 0"
-            (click)="activeView = 'query'"
-          >
+        <section class="library-groups" *ngIf="visualizations.length">
+          <section class="table-group" *ngFor="let group of visualizationGroups()">
+            <header class="table-group-header">
+              <div class="table-group-icon" aria-hidden="true">▤</div>
+              <div class="table-group-title">
+                <span class="eyebrow">{{ connectionName(group.connectionId) }}</span>
+                <h2>{{ group.source }}</h2>
+              </div>
+              <span class="table-group-count">{{ group.items.length }} {{ group.items.length === 1 ? 'visualization' : 'visualizations' }}</span>
+            </header>
+            <div class="table-group-grid">
+              <article class="viz-card library-card" *ngFor="let visualization of group.items">
+                <div class="card-head">
+                  <div>
+                    <span class="type-label">{{ visualization.type }}<span class="type-suffix">{{ visualization.type === 'table' ? ' view' : ' chart' }}</span></span>
+                    <h3>{{ visualization.title }}</h3>
+                    <small>{{ visualization.createdAt | date : "MMM d, y, h:mm a" }}</small>
+                  </div>
+                  <button class="more delete-action" aria-label="Delete visualization" title="Delete visualization" (click)="requestDeleteVisualization(visualization)"></button>
+                </div>
+                <a class="chart-card-placeholder" [routerLink]="['/visualizations', visualization.id]">
+                  <span class="library-open-icon" aria-hidden="true">↗</span>
+                  <span>Open visualization</span>
+                </a>
+              </article>
+            </div>
+          </section>
+        </section>
+        <section class="viz-grid" *ngIf="visualizations.length === 0">
+          <article class="viz-card create-card" (click)="activeView = 'query'">
             <div class="plus-circle">+</div>
             <h3>Build a visualization</h3>
             <p>Ask a question about your data and let Prism find the shape.</p>
             <span class="card-link">Open query studio </span>
-          </article>
-          <article
-            class="viz-card"
-            *ngFor="let visualization of visualizations"
-          >
-            <div class="card-head">
-              <div>
-                <span class="type-label">{{ visualization.type }} chart</span>
-                <h3>{{ visualization.title }}</h3>
-                <small>{{ visualization.source }} · </small
-                ><small>{{
-                  visualization.createdAt | date : "MMM d, y, h:mm a"
-                }}</small>
-              </div>
-              <button
-                class="more delete-action"
-                aria-label="Delete visualization"
-                title="Delete visualization"
-                (click)="requestDeleteVisualization(visualization)"
-              >
-              </button>
-            </div>
-            <a class="chart-card-placeholder" [routerLink]="['/visualizations', visualization.id]">
-              <span>Open visualization</span>
-            </a>
           </article>
         </section>
         <div class="empty-state" *ngIf="visualizations.length === 0">

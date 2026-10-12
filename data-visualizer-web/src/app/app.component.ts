@@ -10,7 +10,7 @@ type ChartType = 'bar' | 'line' | 'donut' | 'table';
 interface Connection { id: string; name: string; type: DatabaseType; host: string; port: number; database: string; username: string; tls: boolean; hasPassword: boolean; status: string; }
 interface TableSource { name: string; type: 'table' | 'view' | 'collection'; }
 interface JoinDefinition { source: string; leftField: string; rightField: string; type: 'inner' | 'left'; }
-interface Visualization { id: string; title: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
+interface Visualization { id: string; title: string; connectionId: string; source: string; join?: JoinDefinition; type: ChartType; createdAt: string; }
 interface FilterControlPreview { field: string; label: string; type: string; operator: string; range?: 'from' | 'to'; category?: boolean; }
 interface QueryPlanPreview { select: Array<{ field: string; label?: string }>; filterGroups: Array<Array<{ field: string; operator: string; value: string | number | boolean }>>; groupBy: string[]; sort: { field: string; direction: string } | null; page: number; pageSize: number; }
 interface ChartPreview { xAxis: { field: string; label: string; scale: string; timeUnit?: string }; yAxis: { field: string; label: string; scale: string }; yAxes?: Array<{ field: string; label: string; scale: string }>; yAggregation: string; }
@@ -23,7 +23,7 @@ interface VisualizationDraftResponse { draftId: string; definition: Visualizatio
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, RouterOutlet],
   templateUrl: './app.component.html',
-  styleUrl: './app.component.css'
+  styleUrls: ['./app.component.css', './visualizations-library.css']
 })
 export class AppComponent implements OnInit {
   private readonly http = inject(HttpClient);
@@ -81,6 +81,19 @@ export class AppComponent implements OnInit {
     return 'info';
   }
   get selectedConnection(): Connection | undefined { return this.connections.find((connection) => connection.id === this.query.connectionId); }
+  visualizationGroups(): Array<{ connectionId: string; source: string; items: Visualization[] }> {
+    const groups = new Map<string, { connectionId: string; source: string; items: Visualization[] }>();
+    for (const item of this.visualizations) {
+      const key = JSON.stringify([item.connectionId, item.source]);
+      const group = groups.get(key) ?? { connectionId: item.connectionId, source: item.source, items: [] };
+      group.items.push(item);
+      groups.set(key, group);
+    }
+    return [...groups.values()];
+  }
+  connectionName(connectionId: string): string {
+    return this.connections.find((connection) => connection.id === connectionId)?.name ?? 'Saved connection';
+  }
   set activeView(value: string) {
     if (this._activeView !== value) window.scrollTo(0, 0);
     this._activeView = value;
